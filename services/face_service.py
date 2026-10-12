@@ -21,9 +21,12 @@ log = logging.getLogger("technerdz.face")
 FACE_IMAGE_DIR = "face_images"
 os.makedirs(FACE_IMAGE_DIR, exist_ok=True)
 
-# SFace cosine similarity needed to accept a match (higher = stricter). Chosen from the
-# LFW benchmark (ml/face_benchmark.py) at a 0.1% false-match rate.
-MATCH_THRESHOLD = float(os.getenv("FACE_MATCH_THRESHOLD", 0.40))
+# SFace cosine similarity needed to accept a match (higher = stricter). On LFW, 0.45 let
+# 0 of 3,000 impostor pairs through (highest impostor scored 0.412) while accepting 95% of
+# genuine pairs, which span years and lighting changes. A kiosk compares same-camera photos and
+# takes the best of ~30 registered images, so genuine scores run much higher. Erring strict
+# also offsets the extra impostor chances that best-of-30 gives. See ml/README.md.
+MATCH_THRESHOLD = float(os.getenv("FACE_MATCH_THRESHOLD", 0.45))
 
 # Eye landmark indices (MediaPipe 478 landmarks)
 LEFT_EYE  = [362, 385, 387, 263, 373, 380]

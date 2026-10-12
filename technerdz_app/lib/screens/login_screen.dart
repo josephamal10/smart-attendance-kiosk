@@ -3,7 +3,6 @@ import '../theme/app_theme.dart';
 import '../services/api_service.dart';
 import '../models/employee.dart';
 import 'admin_dashboard.dart';
-import 'user_dashboard.dart';
 import 'face_verify_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -29,9 +28,9 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _loadEmployees() async {
     try {
       final list = await ApiService.getEmployees();
-      setState(() => _employees = list);
+      if (mounted) setState(() => _employees = list);
     } catch (_) {
-      setState(() => _error = 'Could not connect to server.');
+      if (mounted) setState(() => _error = 'Could not connect to server.');
     }
   }
 
@@ -48,38 +47,37 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       final res = await ApiService.login(_selected!.username, _passCtrl.text);
-      if (res.containsKey('access_token')) {
-        ApiService.setSession(
-          res['access_token'],
-          res['employee_id'],
-          res['role'],
-          res['name'],
-        );
-        if (!mounted) return;
+      ApiService.setSession(
+        res['access_token'],
+        res['employee_id'],
+        res['role'],
+        res['name'],
+      );
+      if (!mounted) return;
 
-        // Admin skips face verify → goes straight to dashboard
-        if (res['role'] == 'admin') {
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (_) => const AdminDashboard()),
-          );
-        } else {
-          // Regular user → must verify face
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(
-              builder: (_) => FaceVerifyScreen(
-                role: res['role'],
-                employeeId: res['employee_id'],
-              ),
-            ),
-          );
-        }
+      // Admin skips face verify → goes straight to dashboard
+      if (res['role'] == 'admin') {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const AdminDashboard()),
+        );
       } else {
-        setState(() => _error = res['detail'] ?? 'Login failed.');
+        // Regular user → must verify face
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (_) => FaceVerifyScreen(
+              role: res['role'],
+              employeeId: res['employee_id'],
+            ),
+          ),
+        );
       }
+    } on ApiException catch (e) {
+      // Wrong password / attempts left / locked out — the server explains which
+      setState(() => _error = e.message);
     } catch (_) {
       setState(() => _error = 'Connection error. Is the server running?');
     } finally {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 

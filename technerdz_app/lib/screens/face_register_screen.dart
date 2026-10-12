@@ -138,6 +138,9 @@ class _FaceRegisterScreenState extends State<FaceRegisterScreen> {
           setState(() =>
             _error = res['detail'] ?? 'No face detected, retrying...');
         }
+    } on ApiException catch (e) {
+      // e.g. "No face detected" / "More than one face" — the timer simply retries
+      if (mounted && !_closing) setState(() => _error = e.message);
     } catch (e) {
       if (mounted && !_closing) {
         setState(() => _error = 'Capture error: $e');

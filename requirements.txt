@@ -1,13 +1,23 @@
-fastapi
-uvicorn
-sqlalchemy
-pymysql
-python-dotenv
-python-jose[cryptography]
-passlib[bcrypt]
-python-multipart
-deepface
-tf-keras
-opencv-python
-numpy
-Pillow
+# API
+fastapi==0.136.3
+uvicorn==0.48.0
+python-multipart==0.0.29
+python-dotenv==1.2.2
+
+# Database
+SQLAlchemy==2.0.50
+PyMySQL==1.2.0            # only needed if DATABASE_URL points at MySQL
+
+# Auth
+python-jose[cryptography]==3.5.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1             # passlib 1.7 breaks with bcrypt >= 4.1
+
+# Face recognition + liveness
+face-recognition==1.3.0   # needs dlib (on Windows: pip install dlib-bin, or build with CMake)
+dlib==20.0.1
+mediapipe==0.10.35
+opencv-python==4.13.0.92
+numpy==2.4.6
+Pillow==12.2.0
+setuptools<81             # face_recognition_models still imports pkg_resources

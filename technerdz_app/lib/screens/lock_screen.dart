@@ -14,6 +14,7 @@ class _LockScreenState extends State<LockScreen>
     with SingleTickerProviderStateMixin {
   late AnimationController _ctrl;
   late Animation<double> _fadeIn;
+  final _focus = FocusNode();
 
   @override
   void initState() {
@@ -25,6 +26,7 @@ class _LockScreenState extends State<LockScreen>
 
   @override
   void dispose() {
+    _focus.dispose();
     _ctrl.dispose();
     super.dispose();
   }
@@ -45,7 +47,8 @@ class _LockScreenState extends State<LockScreen>
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: KeyboardListener(
-        focusNode: FocusNode()..requestFocus(),
+        focusNode: _focus,
+        autofocus: true,
         onKeyEvent: (e) {
           if (e is KeyDownEvent) _goToLogin();
         },

@@ -1,30 +1,31 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:technerdz_app/main.dart';
+import 'package:technerdz_app/models/employee.dart';
+import 'package:technerdz_app/screens/lock_screen.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  testWidgets('Lock screen shows brand and hint', (tester) async {
+    // Plain MaterialApp (not AppTheme) so the test doesn't download Google Fonts
+    await tester.pumpWidget(const MaterialApp(home: LockScreen()));
+    await tester.pump(const Duration(seconds: 2)); // let the fade-in finish
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    expect(find.text('TECHNERDZ'), findsOneWidget);
+    expect(find.text('CLICK OR PRESS ANY KEY TO CONTINUE'), findsOneWidget);
+  });
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+  test('Employee parses the public login list (no role / is_active)', () {
+    final e = Employee.fromJson({'id': 2, 'name': 'Joseph Amal', 'username': 'Amal'});
+    expect(e.role, 'user');
+    expect(e.isActive, isTrue);
+  });
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+  test('AttendanceLog parses null out_time', () {
+    final log = AttendanceLog.fromJson({
+      'id': 1, 'employee_id': 2, 'date': '2026-10-12',
+      'in_time': '2026-10-12T09:01:00', 'out_time': null, 'status': 'present',
+    });
+    expect(log.inTime!.hour, 9);
+    expect(log.outTime, isNull);
   });
 }

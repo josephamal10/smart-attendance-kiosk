@@ -17,8 +17,9 @@ class Employee {
     id:       j['id'],
     name:     j['name'],
     username: j['username'],
-    role:     j['role'],
-    isActive: j['is_active'],
+    // The public login list only sends id/name/username
+    role:     j['role'] ?? 'user',
+    isActive: j['is_active'] ?? true,
   );
 }
 

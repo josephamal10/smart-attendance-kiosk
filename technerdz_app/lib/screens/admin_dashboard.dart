@@ -47,13 +47,23 @@ class _AdminDashboardState extends State<AdminDashboard> {
       final today = await ApiService.getTodayAll();
       final all   = await ApiService.getAllAttendance(start: _startDate, end: _endDate);
       final emps  = await ApiService.getAllEmployees();
+      if (!mounted) return;
       setState(() {
         _todayLogs = today;
         _allLogs   = all;
         _employees = emps;
       });
-    } catch (_) {} finally {
-      setState(() => _loading = false);
+    } catch (e) {
+      // Previously swallowed silently, which made a bad date filter look like "no records"
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          backgroundColor: AppTheme.error,
+          content: Text('Could not load data: $e',
+            style: const TextStyle(color: Colors.white)),
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -61,20 +71,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
     try {
       final path = await ApiService.downloadReport();
       if (!mounted) return;
-      if (path != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: AppTheme.success,
-            content: Row(children: [
-              const Icon(Icons.check_circle, color: Colors.white, size: 16),
-              const SizedBox(width: 8),
-              Expanded(child: Text('Saved to Downloads:\n$path',
-                style: const TextStyle(color: Colors.white, fontSize: 12))),
-            ]),
-            duration: const Duration(seconds: 4),
-          ),
-        );
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: AppTheme.success,
+          content: Row(children: [
+            const Icon(Icons.check_circle, color: Colors.white, size: 16),
+            const SizedBox(width: 8),
+            Expanded(child: Text('Saved to Downloads:\n$path',
+              style: const TextStyle(color: Colors.white, fontSize: 12))),
+          ]),
+          duration: const Duration(seconds: 4),
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -384,6 +392,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   setS(() => _addMsg = 'Employee added successfully!');
                   _nameCtrl.clear(); _userCtrl.clear(); _passCtrl.clear();
                   await _loadData();
+                } on ApiException catch (e) {
+                  // e.g. "Username already exists" — used to show "success" anyway
+                  setS(() => _addMsg = e.statusCode == 422
+                      ? 'Check the fields: username needs 2+ characters, password 6+.'
+                      : e.message);
                 } catch (_) {
                   setS(() => _addMsg = 'Failed to add employee.');
                 }

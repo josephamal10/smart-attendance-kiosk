@@ -19,25 +19,24 @@ class _FaceVerifyScreenState extends State<FaceVerifyScreen>
     with TickerProviderStateMixin {
   CameraController? _cam;
 
-  // Liveness state
+  // Liveness state — the server decides when a blink happened and returns a
+  // one-time token; verification is refused without it.
   bool _blinkDetected = false;
   bool _checkingBlink = false;
   Timer? _blinkTimer;
-  double _lastEar     = 0.0;
-  static const double _earThreshold  = 0.15; // below = blink
-  static const double _earOpenMin    = 0.35; // above = eyes open
-  bool _eyesWereOpen  = false;
+  String? _livenessToken;
+  static const _blinkPrompt = "Please blink to confirm you're real";
 
   // Verify state
   bool _verifying  = false;
   bool _verified   = false;
   bool _closing    = false;
-  String _status   = 'Please blink to confirm you\'re real';
+  String _status   = _blinkPrompt;
   String? _error;
   String? _action;
+  DateTime? _actionTime;
   int _autoLogout  = 3;
   Timer? _logoutTimer;
-  static const int _verifyAttempts = 3;
 
   // Blink animation
   late AnimationController _blinkCtrl;
@@ -67,38 +66,39 @@ class _FaceVerifyScreenState extends State<FaceVerifyScreen>
     }
   }
 
-  // Send frames every 200ms to backend to check EAR
+  // Stream frames to the backend until it reports a blink
   void _startBlinkDetection() {
     if (_closing) return;
     _blinkTimer?.cancel();
-    _blinkTimer = Timer.periodic(const Duration(milliseconds: 200), (_) async {
+    _blinkTimer = Timer.periodic(const Duration(milliseconds: 150), (_) async {
       if (_closing || _blinkDetected || _checkingBlink || _cam == null ||
           !_cam!.value.isInitialized) return;
       _checkingBlink = true;
       try {
         final xFile = await _cam!.takePicture();
-        final res   = await ApiService.checkBlink(File(xFile.path));
+        final res   = await ApiService.sendLivenessFrame(File(xFile.path));
         if (!mounted || _closing) return;
 
-        final ear = (res['ear'] as num?)?.toDouble() ?? 0.0;
-        setState(() => _lastEar = ear);
-
-        if (res['success'] == true) {
-          if (ear > _earOpenMin) {
-            // Eyes are open
-            _eyesWereOpen = true;
-          } else if (_eyesWereOpen && ear < _earThreshold) {
-            // Eyes were open and now closed → blink!
-            _blinkTimer?.cancel();
-            setState(() {
-              _blinkDetected = true;
-              _status        = 'Blink detected ✓ Now verifying face...';
-            });
-            await Future.delayed(const Duration(milliseconds: 500));
-            if (mounted && !_closing) _verify();
-          }
+        if (res['live'] == true && res['liveness_token'] != null) {
+          _blinkTimer?.cancel();
+          setState(() {
+            _blinkDetected = true;
+            _livenessToken = res['liveness_token'];
+            _status        = 'Blink detected ✓ Now verifying face...';
+          });
+          await Future.delayed(const Duration(milliseconds: 300));
+          if (mounted && !_closing) _verify();
+        } else {
+          // e.g. "No face detected" / "Only one person should be in frame"
+          final msg = res['face_found'] == true ? _blinkPrompt : res['message'];
+          if (msg != _status) setState(() => _status = msg ?? _blinkPrompt);
         }
-      } catch (_) {} finally {
+      } on ApiException catch (e) {
+        if (e.statusCode == 401) _blinkTimer?.cancel(); // signed out — stop polling
+        if (mounted && !_closing) setState(() => _error = e.message);
+      } catch (_) {
+        // A dropped frame isn't worth showing; the next tick retries
+      } finally {
         _checkingBlink = false;
       }
     });
@@ -157,8 +157,22 @@ class _FaceVerifyScreenState extends State<FaceVerifyScreen>
     });
   }
 
+  /// Go back to waiting for a blink, showing [error].
+  void _retry(String error) {
+    if (!mounted || _closing) return;
+    setState(() {
+      _error         = error;
+      _status        = _blinkPrompt;
+      _verifying     = false;
+      _blinkDetected = false;
+      _livenessToken = null;
+    });
+    _startBlinkDetection();
+  }
+
   Future<void> _verify() async {
-    if (_closing || _cam == null || _verifying || _verified) return;
+    final token = _livenessToken;
+    if (_closing || _cam == null || _verifying || _verified || token == null) return;
     setState(() {
       _verifying = true;
       _error     = null;
@@ -166,77 +180,35 @@ class _FaceVerifyScreenState extends State<FaceVerifyScreen>
     });
 
     try {
-      Map<String, dynamic>? lastRes;
-
-      for (var attempt = 1; attempt <= _verifyAttempts; attempt++) {
-        if (!mounted || _closing || _cam == null) return;
-        setState(() => _status = 'Verifying face... $attempt/$_verifyAttempts');
-
-        final xFile = await _cam!.takePicture();
-        final res = await ApiService.verifyFace(
-          File(xFile.path),
-          employeeId: widget.employeeId,
-        )
-            .timeout(const Duration(seconds: 15), onTimeout: () {
-          return {
-            'verified': false,
-            'message': 'Server timeout. Is the backend running?'
-          };
-        });
-        lastRes = res;
-        if (!mounted || _closing) return;
-
-        if (res['verified'] == true) {
-          if (res['employee_id'] != widget.employeeId) {
-            setState(() {
-              _error          = 'Face does not match the selected account.';
-              _status         = 'Please blink to confirm you\'re real';
-              _verifying      = false;
-              _blinkDetected  = false;
-              _eyesWereOpen   = false;
-            });
-            _startBlinkDetection();
-            return;
-          }
-          setState(() {
-            _verified   = true;
-            _action     = res['action'];
-            _status     = res['message'] ?? 'Verified!';
-            _autoLogout = 3;
-          });
-          _startAutoLogout();
-          return;
-        }
-
-        await Future.delayed(const Duration(milliseconds: 350));
-      }
-
-      final msg = lastRes?['message'] ?? 'Face not recognized.';
-      setState(() {
-        _error         = msg.contains('No faces registered')
-            ? 'No faces registered yet. Ask admin to register your face first.'
-            : msg;
-        _status        = 'Please blink to confirm you\'re real';
-        _verifying     = false;
-        _blinkDetected = false;
-        _eyesWereOpen  = false;
-      });
-      if (!_closing) _startBlinkDetection();
-    } catch (e) {
+      // The liveness token is single-use, so one photo per blink
+      final xFile = await _cam!.takePicture();
+      final res = await ApiService.verifyFace(File(xFile.path), token)
+          .timeout(const Duration(seconds: 15));
       if (!mounted || _closing) return;
+
+      if (res['verified'] != true) {
+        _retry(res['message'] ?? 'Face not recognized.');
+        return;
+      }
       setState(() {
-        _error         = 'Verification failed: ${e.toString()}';
-        _status        = 'Please blink to confirm you\'re real';
-        _verifying     = false;
-        _blinkDetected = false;
-        _eyesWereOpen  = false;
+        _verified   = true;
+        _action     = res['action'];
+        _actionTime = DateTime.tryParse(res['time'] ?? '');
+        _status     = res['message'] ?? 'Verified!';
+        _autoLogout = 3;
       });
-      if (!_closing) _startBlinkDetection();
+      _startAutoLogout();
+    } on TimeoutException {
+      _retry('Server timeout. Is the backend running?');
+    } on ApiException catch (e) {
+      _retry(e.message);
+    } catch (e) {
+      _retry('Verification failed: $e');
     }
   }
 
-  String _formatNow() {
-    final now = DateTime.now();
+  String _formatTime(DateTime? t) {
+    final now = t ?? DateTime.now();
     final h   = now.hour % 12 == 0 ? 12 : now.hour % 12;
     final m   = now.minute.toString().padLeft(2, '0');
     final s   = now.second.toString().padLeft(2, '0');
@@ -244,12 +216,22 @@ class _FaceVerifyScreenState extends State<FaceVerifyScreen>
     return '$h:$m:$s $ap';
   }
 
-  Color get _actionColor =>
-      _action == 'in' ? AppTheme.success : AppTheme.error;
-  IconData get _actionIcon =>
-      _action == 'in' ? Icons.login : Icons.logout;
-  String get _actionLabel =>
-      _action == 'in' ? 'CHECKED IN' : 'CHECKED OUT';
+  Color get _actionColor => switch (_action) {
+    'in'  => AppTheme.success,
+    'out' => AppTheme.error,
+    _     => AppTheme.accentGrey,   // done / too_soon: nothing changed
+  };
+  IconData get _actionIcon => switch (_action) {
+    'in'  => Icons.login,
+    'out' => Icons.logout,
+    _     => Icons.info_outline,
+  };
+  String get _actionLabel => switch (_action) {
+    'in'       => 'CHECKED IN',
+    'out'      => 'CHECKED OUT',
+    'too_soon' => 'ALREADY IN',
+    _          => 'ALL DONE TODAY',
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -305,7 +287,7 @@ class _FaceVerifyScreenState extends State<FaceVerifyScreen>
                     ),
                   ),
 
-                // Blink indicator (eye icon + EAR bar)
+                // Blink indicator
                 if (!_verified && !_verifying)
                   Positioned(
                     top: 24, left: 0, right: 0,
@@ -398,7 +380,7 @@ class _FaceVerifyScreenState extends State<FaceVerifyScreen>
                                   fontWeight: FontWeight.w700,
                                   letterSpacing: 4)),
                               const SizedBox(height: 12),
-                              Text(_formatNow(),
+                              Text(_formatTime(_actionTime),
                                 style: TextStyle(
                                   color: _actionColor, fontSize: 36,
                                   fontWeight: FontWeight.w300,
@@ -414,28 +396,6 @@ class _FaceVerifyScreenState extends State<FaceVerifyScreen>
                                   color: Colors.white38, fontSize: 12)),
                             ],
                           ),
-                        ),
-                      ),
-                    ),
-                  ),
-
-                // Debug EAR display
-                if (!_verified)
-                  Positioned(
-                    bottom: 32, left: 0, right: 0,
-                    child: Center(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: Colors.black54,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          'EAR: ${_lastEar.toStringAsFixed(3)}  |  Eyes open: $_eyesWereOpen',
-                          style: const TextStyle(
-                            color: Colors.white70, fontSize: 11,
-                            fontFamily: 'monospace'),
                         ),
                       ),
                     ),

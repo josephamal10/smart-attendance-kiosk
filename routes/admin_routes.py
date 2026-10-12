@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from auth import require_admin
 from database import get_db
 from models import AttendanceLog, Employee
 from schemas import AttendanceOut, EmployeeOut
@@ -8,7 +9,8 @@ from datetime import date
 import calendar
 import csv, io
 
-router = APIRouter(prefix="/admin", tags=["Admin"])
+# Every route in this file needs an admin token
+router = APIRouter(prefix="/admin", tags=["Admin"], dependencies=[Depends(require_admin)])
 
 @router.get("/attendance/today", response_model=list[AttendanceOut])
 def today_all(db: Session = Depends(get_db)):
@@ -23,13 +25,13 @@ def employee_history(employee_id: int, db: Session = Depends(get_db)):
 
 @router.get("/attendance/all", response_model=list[AttendanceOut])
 def all_attendance(
-    start: str = Query(None),
-    end:   str = Query(None),
+    start: date | None = Query(None),
+    end:   date | None = Query(None),
     db: Session = Depends(get_db)
 ):
     q = db.query(AttendanceLog)
-    if start: q = q.filter(AttendanceLog.date >= start)
-    if end:   q = q.filter(AttendanceLog.date <= end)
+    if start: q = q.filter(AttendanceLog.date >= start.isoformat())
+    if end:   q = q.filter(AttendanceLog.date <= end.isoformat())
     return q.order_by(AttendanceLog.date.desc()).all()
 
 @router.get("/employees", response_model=list[EmployeeOut])
@@ -38,22 +40,26 @@ def all_employees(db: Session = Depends(get_db)):
 
 @router.get("/attendance/percentage")
 def attendance_percentage(
-    month: int = Query(None, description="Month number 1-12"),
-    year:  int = Query(None, description="4-digit year"),
+    month: int = Query(None, ge=1, le=12, description="Month number 1-12"),
+    year:  int = Query(None, ge=2000, le=2100, description="4-digit year"),
     db: Session = Depends(get_db)
 ):
     """
     Returns attendance % for every employee for the given month/year.
     Defaults to current month if not provided.
-    Working days = Mon–Fri only (excludes weekends).
+    Working days = Mon–Fri only (excludes weekends), counted up to today.
     """
     today     = date.today()
     month     = month or today.month
     year      = year  or today.year
 
-    # Calculate working days in the month up to today
     _, days_in_month = calendar.monthrange(year, month)
-    end_day = min(days_in_month, today.day if (year == today.year and month == today.month) else days_in_month)
+    if (year, month) > (today.year, today.month):
+        end_day = 0                      # future month: nothing to count yet
+    elif (year, month) == (today.year, today.month):
+        end_day = today.day
+    else:
+        end_day = days_in_month
 
     working_days = sum(
         1 for d in range(1, end_day + 1)
@@ -65,17 +71,16 @@ def attendance_percentage(
         Employee.role == "user"
     ).all()
     result    = []
+    start_str = f"{year}-{month:02d}-01"
+    end_str   = f"{year}-{month:02d}-{max(end_day, 1):02d}"
 
     for emp in employees:
-        start_str = f"{year}-{month:02d}-01"
-        end_str   = f"{year}-{month:02d}-{end_day:02d}"
-
         attended = db.query(AttendanceLog).filter(
             AttendanceLog.employee_id == emp.id,
             AttendanceLog.date >= start_str,
             AttendanceLog.date <= end_str,
             AttendanceLog.status == "present",
-        ).count()
+        ).count() if end_day else 0
 
         percentage = round((attended / working_days) * 100, 1) if working_days > 0 else 0.0
 
@@ -91,16 +96,19 @@ def attendance_percentage(
 
 @router.get("/reports/export")
 def export_csv(db: Session = Depends(get_db)):
-    logs   = db.query(AttendanceLog).order_by(AttendanceLog.date.desc()).all()
+    rows = (
+        db.query(AttendanceLog, Employee.name)
+        .outerjoin(Employee, Employee.id == AttendanceLog.employee_id)
+        .order_by(AttendanceLog.date.desc())
+        .all()
+    )
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["ID", "Employee ID", "Name", "Date",
                      "In Time", "Out Time", "Status"])
-    for log in logs:
-        emp = db.query(Employee).filter(Employee.id == log.employee_id).first()
+    for log, name in rows:
         writer.writerow([
-            log.id, log.employee_id,
-            emp.name if emp else "Unknown",
+            log.id, log.employee_id, name or "Unknown",
             log.date, log.in_time, log.out_time, log.status
         ])
     output.seek(0)

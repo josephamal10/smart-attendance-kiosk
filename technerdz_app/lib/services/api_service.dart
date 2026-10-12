@@ -7,8 +7,19 @@ import '../models/employee.dart';
 import '../main.dart' show navigatorKey;
 import '../screens/lock_screen.dart';
 
+/// Thrown for any non-2xx response, carrying the server's `detail` message.
+class ApiException implements Exception {
+  final int statusCode;
+  final String message;
+  ApiException(this.statusCode, this.message);
+  @override
+  String toString() => message;
+}
+
 class ApiService {
-  static const String baseUrl = 'http://127.0.0.1:8000';
+  // Override at build/run time: flutter run --dart-define=API_URL=http://192.168.1.10:8000
+  static const String baseUrl =
+      String.fromEnvironment('API_URL', defaultValue: 'http://127.0.0.1:8000');
   static String? _token;
   static int?    _employeeId;
   static String? _role;
@@ -35,212 +46,194 @@ class ApiService {
     if (_token != null) 'Authorization': 'Bearer $_token',
   };
 
+  static Uri _uri(String path, [Map<String, String?>? query]) {
+    final q = {
+      for (final e in (query ?? {}).entries)
+        if (e.value != null) e.key: e.value!,
+    };
+    return Uri.parse('$baseUrl$path').replace(queryParameters: q.isEmpty ? null : q);
+  }
+
   // ── Global response handler ───────────────────────────
-  // Checks every response for 401 (expired/invalid token)
-  static Map<String, dynamic> _handle(http.Response res) {
-    if (res.statusCode == 401) {
-      // Token expired mid-session
-      final wasLoggedIn = _token != null;
+  // Decodes JSON on success; on failure throws ApiException with the server's message.
+  // A 401 on a logged-in session means the token expired → show dialog, go to lock screen.
+  static dynamic _handle(http.Response res) {
+    if (res.statusCode == 401 && _token != null) {
       clearSession();
-      if (wasLoggedIn) {
-        // Show dialog then go to lock screen
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          final ctx = navigatorKey.currentContext;
-          if (ctx != null) {
-            showDialog(
-              context: ctx,
-              barrierDismissible: false,
-              builder: (_) => AlertDialog(
-                backgroundColor: const Color(0xFF1E1E1E),
-                title: const Row(children: [
-                  Icon(Icons.lock_clock, color: Colors.orange, size: 20),
-                  SizedBox(width: 10),
-                  Text('Session Expired',
-                    style: TextStyle(color: Colors.white, fontSize: 16)),
-                ]),
-                content: const Text(
-                  'Your session has expired. Please login again.',
-                  style: TextStyle(color: Colors.white70, fontSize: 14),
-                ),
-                actions: [
-                  ElevatedButton(
-                    onPressed: () {
-                      Navigator.of(ctx, rootNavigator: true).pop();
-                      navigatorKey.currentState?.pushAndRemoveUntil(
-                        MaterialPageRoute(builder: (_) => const LockScreen()),
-                        (_) => false,
-                      );
-                    },
-                    child: const Text('LOGIN AGAIN'),
-                  ),
-                ],
-              ),
-            );
-          }
-        });
-      }
-      return {'detail': 'Session expired. Please login again.'};
+      _showSessionExpired();
+      throw ApiException(401, 'Session expired. Please login again.');
     }
-    return jsonDecode(res.body);
+    dynamic body;
+    try {
+      body = res.body.isEmpty ? null : jsonDecode(res.body);
+    } on FormatException {
+      body = null;
+    }
+    if (res.statusCode >= 200 && res.statusCode < 300) return body;
+
+    final detail = body is Map ? body['detail'] : null;
+    throw ApiException(
+      res.statusCode,
+      detail is String ? detail : 'Server error (${res.statusCode})',
+    );
+  }
+
+  static void _showSessionExpired() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = navigatorKey.currentContext;
+      if (ctx == null) return;
+      showDialog(
+        context: ctx,
+        barrierDismissible: false,
+        builder: (_) => AlertDialog(
+          backgroundColor: const Color(0xFF1E1E1E),
+          title: const Row(children: [
+            Icon(Icons.lock_clock, color: Colors.orange, size: 20),
+            SizedBox(width: 10),
+            Text('Session Expired',
+              style: TextStyle(color: Colors.white, fontSize: 16)),
+          ]),
+          content: const Text(
+            'Your session has expired. Please login again.',
+            style: TextStyle(color: Colors.white70, fontSize: 14),
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(ctx, rootNavigator: true).pop();
+                navigatorKey.currentState?.pushAndRemoveUntil(
+                  MaterialPageRoute(builder: (_) => const LockScreen()),
+                  (_) => false,
+                );
+              },
+              child: const Text('LOGIN AGAIN'),
+            ),
+          ],
+        ),
+      );
+    });
+  }
+
+  static Future<dynamic> _multipart(
+      String path, File file, [Map<String, String> fields = const {}]) async {
+    final req = http.MultipartRequest('POST', _uri(path));
+    if (_token != null) req.headers['Authorization'] = 'Bearer $_token';
+    req.fields.addAll(fields);
+    req.files.add(await http.MultipartFile.fromPath('file', file.path));
+    final res = await http.Response.fromStream(await req.send());
+    return _handle(res);
   }
 
   // ── Auth ─────────────────────────────────────────────
+  /// Returns the token payload, or throws ApiException with the reason
+  /// (wrong password, attempts left, locked out...).
   static Future<Map<String, dynamic>> login(
       String username, String password) async {
     final res = await http.post(
-      Uri.parse('$baseUrl/auth/login'),
-      headers: _headers,
+      _uri('/auth/login'),
+      headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'username': username, 'password': password}),
     );
-    // For login, don't use _handle (401 = wrong password, not expiry)
-    return jsonDecode(res.body);
+    return Map<String, dynamic>.from(_handle(res));
   }
 
   static Future<List<Employee>> getEmployees() async {
-    final res = await http.get(
-      Uri.parse('$baseUrl/auth/employees'), headers: _headers);
-    if (res.statusCode == 401) { _handle(res); return []; }
-    final List data = jsonDecode(res.body);
+    final res = await http.get(_uri('/auth/employees'));
+    final List data = _handle(res);
     return data.map((e) => Employee.fromJson(e)).toList();
   }
 
   static Future<Map<String, dynamic>> registerEmployee(
       String name, String username, String password, String role) async {
     final res = await http.post(
-      Uri.parse('$baseUrl/auth/register'),
+      _uri('/auth/register'),
       headers: _headers,
       body: jsonEncode({
         'name': name, 'username': username,
         'password': password, 'role': role
       }),
     );
-    return _handle(res);
+    return Map<String, dynamic>.from(_handle(res));
   }
 
   // ── Face ─────────────────────────────────────────────
   static Future<Map<String, dynamic>> registerFace(
       int employeeId, String direction, File imageFile) async {
-    final req = http.MultipartRequest(
-      'POST', Uri.parse('$baseUrl/face/register'));
-    req.headers['Authorization'] = 'Bearer $_token';
-    req.fields['employee_id'] = employeeId.toString();
-    req.fields['direction']   = direction;
-    req.files.add(await http.MultipartFile.fromPath('file', imageFile.path));
-    final streamed = await req.send();
-    final res      = await http.Response.fromStream(streamed);
-    return _handle(res);
+    return Map<String, dynamic>.from(await _multipart('/face/register', imageFile, {
+      'employee_id': employeeId.toString(),
+      'direction': direction,
+    }));
   }
 
   static Future<Map<String, dynamic>> getFaceCount(int employeeId) async {
-    final res = await http.get(
-      Uri.parse('$baseUrl/face/count/$employeeId'), headers: _headers);
-    return _handle(res);
+    final res = await http.get(_uri('/face/count/$employeeId'), headers: _headers);
+    return Map<String, dynamic>.from(_handle(res));
   }
 
-  static Future<Map<String, dynamic>> deleteFaceImages(int employeeId) async {
-    final res = await http.delete(
-      Uri.parse('$baseUrl/face/delete/$employeeId'),
-      headers: _headers,
-    );
-    return _handle(res);
+  static Future<void> deleteFaceImages(int employeeId) async {
+    _handle(await http.delete(_uri('/face/delete/$employeeId'), headers: _headers));
   }
 
-  static Future<Map<String, dynamic>> deleteFaceImage(int imageId) async {
-    final res = await http.delete(
-      Uri.parse('$baseUrl/face/image/$imageId'),
-      headers: _headers,
-    );
-    return _handle(res);
-  }
-
-  static Future<Map<String, dynamic>> checkBlink(File imageFile) async {
-    final req = http.MultipartRequest(
-        'POST', Uri.parse('$baseUrl/face/blink'));
-    req.files.add(await http.MultipartFile.fromPath('file', imageFile.path));
-    final streamed = await req.send();
-    final res      = await http.Response.fromStream(streamed);
-    if (res.statusCode != 200) {
-      return {"success": false, "ear": 0.0, "message": "Server error ${res.statusCode}"};
-    }
-    return jsonDecode(res.body);
+  static Future<void> deleteFaceImage(int imageId) async {
+    _handle(await http.delete(_uri('/face/image/$imageId'), headers: _headers));
   }
 
   // ── Attendance ────────────────────────────────────────
+  /// Send one camera frame for the server-side blink check.
+  /// Response has `live`, `face_found`, `message`, and `liveness_token` once live.
+  static Future<Map<String, dynamic>> sendLivenessFrame(File imageFile) async {
+    return Map<String, dynamic>.from(await _multipart('/attendance/liveness', imageFile));
+  }
+
   static Future<Map<String, dynamic>> verifyFace(
-      File imageFile, {int? employeeId}) async {
-    final req = http.MultipartRequest(
-      'POST', Uri.parse('$baseUrl/attendance/verify'));
-    if (_token != null) req.headers['Authorization'] = 'Bearer $_token';
-    if (employeeId != null) {
-      req.fields['employee_id'] = employeeId.toString();
-    }
-    req.files.add(await http.MultipartFile.fromPath('file', imageFile.path));
-    final streamed = await req.send();
-    final res      = await http.Response.fromStream(streamed);
-    return _handle(res);
+      File imageFile, String livenessToken) async {
+    return Map<String, dynamic>.from(await _multipart(
+      '/attendance/verify', imageFile, {'liveness_token': livenessToken}));
   }
 
   static Future<AttendanceLog?> getTodayLog(int employeeId) async {
-    final res = await http.get(
-      Uri.parse('$baseUrl/attendance/today/$employeeId'), headers: _headers);
+    final res = await http.get(_uri('/attendance/today/$employeeId'), headers: _headers);
     if (res.statusCode == 404) return null;
-    final data = _handle(res);
-    if (data.containsKey('detail')) return null;
-    return AttendanceLog.fromJson(data);
+    return AttendanceLog.fromJson(_handle(res));
   }
 
   // ── Admin ─────────────────────────────────────────────
   static Future<List<AttendanceLog>> getTodayAll() async {
-    final res = await http.get(
-      Uri.parse('$baseUrl/admin/attendance/today'), headers: _headers);
-    if (res.statusCode == 401) { _handle(res); return []; }
-    final List data = jsonDecode(res.body);
+    final List data = _handle(
+      await http.get(_uri('/admin/attendance/today'), headers: _headers));
     return data.map((e) => AttendanceLog.fromJson(e)).toList();
   }
 
   static Future<List<AttendanceLog>> getAllAttendance(
       {String? start, String? end}) async {
-    String url = '$baseUrl/admin/attendance/all';
-    if (start != null || end != null) {
-      url += '?';
-      if (start != null) url += 'start=$start&';
-      if (end   != null) url += 'end=$end';
-    }
-    final res = await http.get(Uri.parse(url), headers: _headers);
-    if (res.statusCode == 401) { _handle(res); return []; }
-    final List data = jsonDecode(res.body);
+    final List data = _handle(await http.get(
+      _uri('/admin/attendance/all', {'start': start, 'end': end}),
+      headers: _headers));
     return data.map((e) => AttendanceLog.fromJson(e)).toList();
   }
 
-  static Future<String?> downloadReport() async {
-    final res = await http.get(
-      Uri.parse('$baseUrl/admin/reports/export'), headers: _headers);
-    if (res.statusCode == 401) { _handle(res); return null; }
-    // Save to Downloads folder
-    final dir      = 'C:\\Users\\${Platform.environment['USERNAME']}\\Downloads';
-    final filename = 'attendance_${DateTime.now().millisecondsSinceEpoch}.csv';
-    final file     = File('$dir\\$filename');
+  static Future<String> downloadReport() async {
+    final res = await http.get(_uri('/admin/reports/export'), headers: _headers);
+    _handle(res);
+    final home = Platform.environment['USERPROFILE'] ?? Platform.environment['HOME'] ?? '.';
+    final dir  = Directory('$home${Platform.pathSeparator}Downloads');
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+    final file = File('${dir.path}${Platform.pathSeparator}'
+        'attendance_${DateTime.now().millisecondsSinceEpoch}.csv');
     await file.writeAsBytes(res.bodyBytes);
     return file.path;
   }
 
   static Future<List<dynamic>> getAttendancePercentage({int? month, int? year}) async {
-    String url = '$baseUrl/admin/attendance/percentage';
-    if (month != null || year != null) {
-      url += '?';
-      if (month != null) url += 'month=$month&';
-      if (year  != null) url += 'year=$year';
-    }
-    final res = await http.get(Uri.parse(url), headers: _headers);
-    if (res.statusCode == 401) { _handle(res); return []; }
-    return jsonDecode(res.body);
+    return _handle(await http.get(
+      _uri('/admin/attendance/percentage',
+          {'month': month?.toString(), 'year': year?.toString()}),
+      headers: _headers));
   }
 
   static Future<List<Employee>> getAllEmployees() async {
-    final res = await http.get(
-      Uri.parse('$baseUrl/admin/employees'), headers: _headers);
-    if (res.statusCode == 401) { _handle(res); return []; }
-    final List data = jsonDecode(res.body);
+    final List data = _handle(
+      await http.get(_uri('/admin/employees'), headers: _headers));
     return data.map((e) => Employee.fromJson(e)).toList();
   }
 }

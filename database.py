@@ -1,12 +1,11 @@
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import declarative_base, sessionmaker
 from dotenv import load_dotenv
 import os
 
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./technerdz.db")
 
 engine = create_engine(
     DATABASE_URL,
@@ -21,3 +20,12 @@ def get_db():
         yield db
     finally:
         db.close()
+
+def init_db(bind=engine):
+    """Create missing tables, plus any indexes added to existing tables since
+    (create_all only creates indexes together with a brand-new table)."""
+    import models  # noqa: F401 — registers the tables on Base
+    Base.metadata.create_all(bind=bind)
+    for table in Base.metadata.sorted_tables:
+        for index in table.indexes:
+            index.create(bind=bind, checkfirst=True)

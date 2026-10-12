@@ -1,5 +1,5 @@
-from pydantic import BaseModel
-from typing import Optional
+from pydantic import BaseModel, ConfigDict, Field
+from typing import Literal, Optional
 from datetime import datetime
 
 # ---------- Auth ----------
@@ -16,12 +16,20 @@ class TokenResponse(BaseModel):
 
 # ---------- Employee ----------
 class EmployeeCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    username: str = Field(min_length=2, max_length=50)
+    password: str = Field(min_length=6)
+    role: Literal["user", "admin"] = "user"
+
+class EmployeePublic(BaseModel):
+    """What the login screen is allowed to see before anyone signs in."""
+    model_config = ConfigDict(from_attributes=True)
+    id: int
     name: str
     username: str
-    password: str
-    role: str = "user"
 
 class EmployeeOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     name: str
     username: str
@@ -29,11 +37,9 @@ class EmployeeOut(BaseModel):
     is_active: bool
     created_at: datetime
 
-    class Config:
-        orm_mode = True
-
 # ---------- Attendance ----------
 class AttendanceOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     employee_id: int
     date: str
@@ -41,14 +47,18 @@ class AttendanceOut(BaseModel):
     out_time: Optional[datetime]
     status: str
 
-    class Config:
-        orm_mode = True
-
 # ---------- Face ----------
+class LivenessResponse(BaseModel):
+    live: bool
+    face_found: bool
+    ear: float
+    message: str
+    liveness_token: Optional[str] = None
+
 class FaceVerifyResponse(BaseModel):
     verified: bool
-    employee_id: Optional[int]
-    name: Optional[str]
-    action: Optional[str]   # "in" or "out"
-    time: Optional[datetime]
+    employee_id: Optional[int] = None
+    name: Optional[str] = None
+    action: Optional[Literal["in", "out", "done", "too_soon"]] = None
+    time: Optional[datetime] = None
     message: str

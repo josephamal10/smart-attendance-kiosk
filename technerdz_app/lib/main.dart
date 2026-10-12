@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:camera_windows/camera_windows.dart';
 import 'services/api_service.dart';
 import 'theme/app_theme.dart';
@@ -24,7 +25,10 @@ class TechnerdzApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: AppTheme.theme,
       navigatorKey: navigatorKey,
-      home: const IdleDetector(child: LockScreen()),
+      // Wrap the Navigator itself so taps on *every* screen reset the idle timer
+      // (wrapping only `home` missed every screen pushed on top of it).
+      builder: (context, child) => IdleDetector(child: child!),
+      home: const LockScreen(),
     );
   }
 }
@@ -39,12 +43,20 @@ class IdleDetector extends StatefulWidget {
 
 class _IdleDetectorState extends State<IdleDetector> {
   Timer? _timer;
-  static const _timeout = Duration(seconds: 5);
+  // Kiosk safety net: sign a user out if the machine is left alone mid-session.
+  // Must be longer than a face scan, or users get kicked out while blinking.
+  static const _timeout = Duration(seconds: 60);
 
   @override
   void initState() {
     super.initState();
+    HardwareKeyboard.instance.addHandler(_onKey);
     _reset();
+  }
+
+  bool _onKey(KeyEvent _) {
+    _reset();
+    return false; // don't swallow the key
   }
 
   void _reset() {
@@ -64,6 +76,7 @@ class _IdleDetectorState extends State<IdleDetector> {
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_onKey);
     _timer?.cancel();
     super.dispose();
   }

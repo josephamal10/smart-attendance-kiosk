@@ -4,8 +4,24 @@ import '../theme/app_theme.dart';
 import '../services/api_service.dart';
 import '../models/employee.dart';
 import '../widgets/clock_widget.dart';
+import '../widgets/ui.dart';
 import 'lock_screen.dart';
 import 'face_register_screen.dart';
+
+enum _Page { overview, attendance, employees }
+
+extension on _Page {
+  String get title => switch (this) {
+        _Page.overview   => 'Overview',
+        _Page.attendance => 'Attendance records',
+        _Page.employees  => 'Employees',
+      };
+  IconData get icon => switch (this) {
+        _Page.overview   => Icons.space_dashboard_outlined,
+        _Page.attendance => Icons.event_note_outlined,
+        _Page.employees  => Icons.groups_outlined,
+      };
+}
 
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({super.key});
@@ -14,26 +30,17 @@ class AdminDashboard extends StatefulWidget {
 }
 
 class _AdminDashboardState extends State<AdminDashboard> {
-  int _selectedIndex = 0;
-  final _pages = ['Today', 'All Records', 'Employees'];
-
-  List<AttendanceLog> _todayLogs = [];
-  List<AttendanceLog> _allLogs   = [];
-  List<Employee>      _employees = [];
+  _Page _page = _Page.overview;
   bool _loading = true;
 
-  // Date filter
-  String? _startDate;
-  String? _endDate;
-  final _startCtrl = TextEditingController();
-  final _endCtrl   = TextEditingController();
+  List<AttendanceLog> _todayLogs = [];
+  List<AttendanceLog> _allLogs = [];
+  List<Employee> _employees = [];
+  final Map<int, int> _faceCounts = {};
+  final Map<int, Map<String, dynamic>> _monthStats = {};
+  DateTimeRange? _range;
 
-  // Add employee form
-  final _nameCtrl = TextEditingController();
-  final _userCtrl = TextEditingController();
-  final _passCtrl = TextEditingController();
-  String _newRole = 'user';
-  String? _addMsg;
+  static final _day = DateFormat('yyyy-MM-dd');
 
   @override
   void initState() {
@@ -44,835 +51,642 @@ class _AdminDashboardState extends State<AdminDashboard> {
   Future<void> _loadData() async {
     setState(() => _loading = true);
     try {
-      final today = await ApiService.getTodayAll();
-      final all   = await ApiService.getAllAttendance(start: _startDate, end: _endDate);
-      final emps  = await ApiService.getAllEmployees();
+      final results = await Future.wait([
+        ApiService.getTodayAll(),
+        ApiService.getAllAttendance(
+          start: _range == null ? null : _day.format(_range!.start),
+          end: _range == null ? null : _day.format(_range!.end),
+        ),
+        ApiService.getAllEmployees(),
+        ApiService.getAttendancePercentage(),
+      ]);
+      final emps = results[2] as List<Employee>;
+      final counts = await Future.wait(emps.map((e) => ApiService.getFaceCount(e.id)));
       if (!mounted) return;
       setState(() {
-        _todayLogs = today;
-        _allLogs   = all;
+        _todayLogs = (results[0] as List<AttendanceLog>)
+          ..sort((a, b) => (b.inTime ?? DateTime(0)).compareTo(a.inTime ?? DateTime(0)));
+        _allLogs = (results[1] as List<AttendanceLog>)
+          ..sort((a, b) {
+            final byDate = b.date.compareTo(a.date);
+            return byDate != 0 ? byDate : (b.inTime ?? DateTime(0)).compareTo(a.inTime ?? DateTime(0));
+          });
         _employees = emps;
+        _faceCounts
+          ..clear()
+          ..addAll({for (var i = 0; i < emps.length; i++) emps[i].id: (counts[i]['total'] as int?) ?? 0});
+        _monthStats
+          ..clear()
+          ..addAll({for (final r in results[3]) r['employee_id'] as int: Map<String, dynamic>.from(r)});
       });
     } catch (e) {
-      // Previously swallowed silently, which made a bad date filter look like "no records"
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          backgroundColor: AppTheme.error,
-          content: Text('Could not load data: $e',
-            style: const TextStyle(color: Colors.white)),
-        ));
-      }
+      if (mounted) _toast('Could not load data: $e', error: true);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
-  void _exportCSV() async {
+  void _toast(String msg, {bool error = false}) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      backgroundColor: error ? AppTheme.danger : AppTheme.textPrimary,
+      content: Text(msg),
+    ));
+  }
+
+  Future<void> _exportCSV() async {
     try {
       final path = await ApiService.downloadReport();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: AppTheme.success,
-          content: Row(children: [
-            const Icon(Icons.check_circle, color: Colors.white, size: 16),
-            const SizedBox(width: 8),
-            Expanded(child: Text('Saved to Downloads:\n$path',
-              style: const TextStyle(color: Colors.white, fontSize: 12))),
-          ]),
-          duration: const Duration(seconds: 4),
-        ),
-      );
+      if (mounted) _toast('Report saved to $path');
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: AppTheme.error,
-          content: Text('Export failed: $e',
-            style: const TextStyle(color: Colors.white)),
-        ),
-      );
+      if (mounted) _toast('Export failed: $e', error: true);
     }
   }
 
   void _logout() {
     ApiService.clearSession();
     Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const LockScreen()), (_) => false,
-    );
+        MaterialPageRoute(builder: (_) => const LockScreen()), (_) => false);
   }
 
-  String _empName(int id) =>
-      _employees.firstWhere((e) => e.id == id,
-        orElse: () => Employee(id: 0, name: 'Unknown',
-          username: '', role: '', isActive: false)).name;
+  Future<void> _addEmployee() async {
+    final created = await showDialog<String>(context: context, builder: (_) => const _AddEmployeeDialog());
+    if (created != null && mounted) {
+      _toast('$created was added. Register their face next.');
+      _loadData();
+    }
+  }
 
-  String _fmt(DateTime? dt) =>
-      dt != null ? DateFormat('hh:mm a').format(dt) : '—';
+  Future<void> _registerFace(Employee emp, {bool replace = false}) async {
+    if (replace) {
+      final ok = await _confirm(
+        title: 'Re-register ${emp.name}?',
+        message: 'Their ${_faceCounts[emp.id] ?? 0} current face photos will be deleted '
+            'and replaced by a new set of 30.',
+        action: 'Delete & re-register',
+      );
+      if (!ok) return;
+      try {
+        await ApiService.deleteFaceImages(emp.id);
+      } catch (e) {
+        if (mounted) _toast('Could not delete old photos: $e', error: true);
+        return;
+      }
+    }
+    if (!mounted) return;
+    await Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => FaceRegisterScreen(employeeId: emp.id, employeeName: emp.name)));
+    _loadData();
+  }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppTheme.background,
-      body: Row(
-        children: [
-          // ── Sidebar ──────────────────────────────────
-          Container(
-            width: 220,
-            decoration: const BoxDecoration(
-              color: AppTheme.surface,
-              border: Border(right: BorderSide(color: AppTheme.border)),
-            ),
-            child: Column(
-              children: [
-                const SizedBox(height: 40),
-                const Text('TECHNERDZ',
-                  style: TextStyle(fontSize: 11, letterSpacing: 6,
-                    color: AppTheme.accentGrey, fontWeight: FontWeight.w600)),
-                const SizedBox(height: 8),
-                const Text('ADMIN PANEL',
-                  style: TextStyle(fontSize: 9, letterSpacing: 4,
-                    color: AppTheme.accentGrey)),
-                const SizedBox(height: 32),
-                const Divider(),
-                const SizedBox(height: 16),
+  Future<void> _deleteFaces(Employee emp) async {
+    final ok = await _confirm(
+      title: 'Delete face data for ${emp.name}?',
+      message: "They won't be able to check in until their face is registered again.",
+      action: 'Delete',
+    );
+    if (!ok) return;
+    try {
+      await ApiService.deleteFaceImages(emp.id);
+      if (mounted) _toast('Face data deleted for ${emp.name}.');
+      _loadData();
+    } catch (e) {
+      if (mounted) _toast('Delete failed: $e', error: true);
+    }
+  }
 
-                ..._pages.asMap().entries.map((e) => _NavItem(
-                  label: e.value,
-                  index: e.key,
-                  selected: _selectedIndex == e.key,
-                  icon: [Icons.today, Icons.list_alt, Icons.people][e.key],
-                  onTap: () => setState(() => _selectedIndex = e.key),
-                )),
-
-                const Spacer(),
-                const Divider(),
-
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppTheme.accent,
-                      side: const BorderSide(color: AppTheme.accent),
-                      minimumSize: const Size(double.infinity, 44),
-                    ),
-                    icon: const Icon(Icons.download, size: 16),
-                    label: const Text('Export CSV',
-                      style: TextStyle(fontSize: 12, letterSpacing: 1)),
-                    onPressed: _exportCSV,
-                  ),
-                ),
-
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppTheme.accentGrey,
-                      side: const BorderSide(color: AppTheme.border),
-                      minimumSize: const Size(double.infinity, 44),
-                    ),
-                    icon: const Icon(Icons.person_add, size: 16),
-                    label: const Text('Add Employee',
-                      style: TextStyle(fontSize: 12, letterSpacing: 1)),
-                    onPressed: () => _showAddEmployee(context),
-                  ),
-                ),
-
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppTheme.error,
-                      side: const BorderSide(color: AppTheme.error),
-                      minimumSize: const Size(double.infinity, 44),
-                    ),
-                    icon: const Icon(Icons.logout, size: 16),
-                    label: const Text('Sign Out',
-                      style: TextStyle(fontSize: 12, letterSpacing: 1)),
-                    onPressed: _logout,
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // ── Main Content ─────────────────────────────
-          Expanded(
-            child: _loading
-              ? const Center(child: CircularProgressIndicator(color: AppTheme.accent))
-              : Padding(
-                  padding: const EdgeInsets.all(48),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(_pages[_selectedIndex],
-                                style: const TextStyle(fontSize: 28,
-                                  fontWeight: FontWeight.w600,
-                                  color: AppTheme.textPrimary)),
-                              const SizedBox(height: 4),
-                              Text(DateFormat('EEEE, MMMM d yyyy').format(DateTime.now()),
-                                style: const TextStyle(
-                                  color: AppTheme.accentGrey, fontSize: 14)),
-                            ],
-                          ),
-                          Row(children: [
-                            const ClockWidget(),
-                            const SizedBox(width: 24),
-                            IconButton(
-                              onPressed: _loadData,
-                              icon: const Icon(Icons.refresh,
-                                color: AppTheme.accentGrey),
-                              tooltip: 'Refresh',
-                            ),
-                          ]),
-                        ],
-                      ),
-
-                      const SizedBox(height: 32),
-
-                      if (_selectedIndex == 0) ...[
-                        _StatsRow(
-                          total:   _employees.length,
-                          present: _todayLogs.length,
-                          absent:  _employees.length - _todayLogs.length,
-                        ),
-                        const SizedBox(height: 32),
-                      ],
-
-                      Expanded(child: _buildTable()),
-                    ],
-                  ),
-                ),
+  Future<bool> _confirm({required String title, required String message, required String action}) async {
+    final res = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: SizedBox(width: 380, child: Text(message, style: AppTheme.muted)),
+        actions: [
+          OutlinedButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.danger),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(action),
           ),
         ],
       ),
     );
+    return res ?? false;
   }
 
-  Widget _buildTable() {
-    if (_selectedIndex == 0) {
-      return _AttendanceTable(
-        logs: _todayLogs, empName: _empName, fmt: _fmt);
-    }
-    if (_selectedIndex == 1) {
-      return Column(children: [
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: AppTheme.card,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppTheme.border),
-          ),
-          child: Row(children: [
-            const Text('FILTER BY DATE',
-              style: TextStyle(fontSize: 10, letterSpacing: 2,
-                color: AppTheme.accentGrey)),
-            const SizedBox(width: 24),
-            Expanded(
-              child: TextField(
-                controller: _startCtrl,
-                style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-                decoration: const InputDecoration(
-                  labelText: 'From (YYYY-MM-DD)', isDense: true,
-                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10)),
-                onChanged: (v) => _startDate = v.isEmpty ? null : v,
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: TextField(
-                controller: _endCtrl,
-                style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-                decoration: const InputDecoration(
-                  labelText: 'To (YYYY-MM-DD)', isDense: true,
-                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10)),
-                onChanged: (v) => _endDate = v.isEmpty ? null : v,
-              ),
-            ),
-            const SizedBox(width: 16),
-            ElevatedButton(onPressed: _loadData, child: const Text('FILTER')),
-            const SizedBox(width: 8),
-            OutlinedButton(
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppTheme.accentGrey,
-                side: const BorderSide(color: AppTheme.border)),
-              onPressed: () {
-                _startCtrl.clear(); _endCtrl.clear();
-                _startDate = null; _endDate = null;
-                _loadData();
-              },
-              child: const Text('CLEAR'),
-            ),
-          ]),
-        ),
-        const SizedBox(height: 16),
-        Expanded(
-          child: _AttendanceTable(
-            logs: _allLogs, empName: _empName,
-            fmt: _fmt, showDate: true),
-        ),
-      ]);
-    }
-
-    return _EmployeeTableWithSearch(
-      employees: _employees,
-      onRegisterFace: (emp) {
-        Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => FaceRegisterScreen(
-            employeeId: emp.id, employeeName: emp.name),
-        )).then((_) => _loadData());
-      },
-    );
-  }
-
-  void _showAddEmployee(BuildContext ctx) {
-    showDialog(
-      context: ctx,
-      builder: (_) => StatefulBuilder(
-        builder: (ctx, setS) => AlertDialog(
-          backgroundColor: AppTheme.surface,
-          title: const Text('Add Employee',
-            style: TextStyle(color: AppTheme.textPrimary)),
-          content: SizedBox(
-            width: 360,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(controller: _nameCtrl,
-                  style: const TextStyle(color: AppTheme.textPrimary),
-                  decoration: const InputDecoration(labelText: 'Full Name')),
-                const SizedBox(height: 16),
-                TextField(controller: _userCtrl,
-                  style: const TextStyle(color: AppTheme.textPrimary),
-                  decoration: const InputDecoration(labelText: 'Username')),
-                const SizedBox(height: 16),
-                TextField(controller: _passCtrl, obscureText: true,
-                  style: const TextStyle(color: AppTheme.textPrimary),
-                  decoration: const InputDecoration(labelText: 'Password')),
-                const SizedBox(height: 16),
-                DropdownButtonFormField<String>(
-                  initialValue: _newRole,
-                  dropdownColor: AppTheme.card,
-                  style: const TextStyle(color: AppTheme.textPrimary),
-                  decoration: const InputDecoration(labelText: 'Role'),
-                  items: const [
-                    DropdownMenuItem(value: 'user',  child: Text('Employee')),
-                    DropdownMenuItem(value: 'admin', child: Text('Admin')),
-                  ],
-                  onChanged: (v) => setS(() => _newRole = v!),
-                ),
-                if (_addMsg != null) ...[
-                  const SizedBox(height: 12),
-                  Text(_addMsg!, style: TextStyle(
-                    color: _addMsg!.contains('success')
-                      ? AppTheme.success : AppTheme.error,
-                    fontSize: 13)),
-                ],
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel',
-                style: TextStyle(color: AppTheme.accentGrey))),
-            ElevatedButton(
-              onPressed: () async {
-                try {
-                  await ApiService.registerEmployee(
-                    _nameCtrl.text, _userCtrl.text,
-                    _passCtrl.text, _newRole,
-                  );
-                  setS(() => _addMsg = 'Employee added successfully!');
-                  _nameCtrl.clear(); _userCtrl.clear(); _passCtrl.clear();
-                  await _loadData();
-                } on ApiException catch (e) {
-                  // e.g. "Username already exists" — used to show "success" anyway
-                  setS(() => _addMsg = e.statusCode == 422
-                      ? 'Check the fields: username needs 2+ characters, password 6+.'
-                      : e.message);
-                } catch (_) {
-                  setS(() => _addMsg = 'Failed to add employee.');
-                }
-              },
-              child: const Text('ADD'),
-            ),
-          ],
-        ),
+  Future<void> _pickRange() async {
+    final now = DateTime.now();
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(now.year - 3),
+      lastDate: now,
+      initialDateRange: _range ?? DateTimeRange(start: DateTime(now.year, now.month, 1), end: now),
+      builder: (ctx, child) => Center(
+        child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 420, maxHeight: 640), child: child),
       ),
     );
+    if (picked != null) {
+      setState(() => _range = picked);
+      _loadData();
+    }
   }
-}
 
-// ── Nav Item ──────────────────────────────────────────────
-class _NavItem extends StatelessWidget {
-  final String label; final int index; final bool selected;
-  final IconData icon; final VoidCallback onTap;
-  const _NavItem({required this.label, required this.index,
-    required this.selected, required this.icon, required this.onTap});
+  String _empName(int id) =>
+      _employees.where((e) => e.id == id).map((e) => e.name).firstOrNull ?? 'Former employee';
 
-  @override
-  Widget build(BuildContext context) => GestureDetector(
-    onTap: onTap,
-    child: Container(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: selected ? AppTheme.card : Colors.transparent,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: selected ? AppTheme.border : Colors.transparent)),
-      child: Row(children: [
-        Icon(icon, size: 16,
-          color: selected ? AppTheme.textPrimary : AppTheme.accentGrey),
-        const SizedBox(width: 12),
-        Text(label, style: TextStyle(
-          fontSize: 13, fontWeight: FontWeight.w500,
-          color: selected ? AppTheme.textPrimary : AppTheme.accentGrey)),
-      ]),
-    ),
-  );
-}
-
-// ── Stats Row ─────────────────────────────────────────────
-class _StatsRow extends StatelessWidget {
-  final int total, present, absent;
-  const _StatsRow({required this.total, required this.present, required this.absent});
-
-  @override
-  Widget build(BuildContext context) => Row(children: [
-    _StatCard(label: 'TOTAL EMPLOYEES', value: '$total', color: AppTheme.accentGrey),
-    const SizedBox(width: 16),
-    _StatCard(label: 'PRESENT TODAY',   value: '$present', color: AppTheme.success),
-    const SizedBox(width: 16),
-    _StatCard(label: 'ABSENT TODAY',    value: '$absent',  color: AppTheme.error),
-  ]);
-}
-
-class _StatCard extends StatelessWidget {
-  final String label, value; final Color color;
-  const _StatCard({required this.label, required this.value, required this.color});
-
-  @override
-  Widget build(BuildContext context) => Expanded(
-    child: Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppTheme.card,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.border),
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(label, style: const TextStyle(fontSize: 10,
-          letterSpacing: 2, color: AppTheme.accentGrey)),
-        const SizedBox(height: 8),
-        Text(value, style: TextStyle(fontSize: 32,
-          fontWeight: FontWeight.w300, color: color)),
-      ]),
-    ),
-  );
-}
-
-// ── Attendance Table ──────────────────────────────────────
-class _AttendanceTable extends StatelessWidget {
-  final List<AttendanceLog> logs;
-  final String Function(int) empName;
-  final String Function(DateTime?) fmt;
-  final bool showDate;
-  const _AttendanceTable({
-    required this.logs, required this.empName,
-    required this.fmt,  this.showDate = false,
-  });
+  // ── Layout ───────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    if (logs.isEmpty) {
-      return const Center(
-      child: Text('No records found.',
-        style: TextStyle(color: AppTheme.accentGrey)));
-    }
+    return Scaffold(
+      body: Row(children: [
+        _sidebar(),
+        Expanded(
+          child: Column(children: [
+            _topBar(),
+            Expanded(
+              child: _loading && _employees.isEmpty
+                  ? const Center(child: CircularProgressIndicator())
+                  : SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(32, 8, 32, 40),
+                      child: Align(
+                        alignment: Alignment.topLeft,
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 1240),
+                          child: switch (_page) {
+                            _Page.overview   => _overview(),
+                            _Page.attendance => _attendance(),
+                            _Page.employees  => _employeesPage(),
+                          },
+                        ),
+                      ),
+                    ),
+            ),
+          ]),
+        ),
+      ]),
+    );
+  }
 
+  Widget _sidebar() {
+    final admin = ApiService.name ?? 'Administrator';
     return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.card,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.border),
+      width: 248,
+      decoration: const BoxDecoration(
+        color: AppTheme.surface,
+        border: Border(right: BorderSide(color: AppTheme.border)),
       ),
-      child: SingleChildScrollView(
-        child: Table(
-          columnWidths: {
-            0: const FlexColumnWidth(2),
-            if (showDate) 1: const FlexColumnWidth(1.5),
-            if (showDate) 2: const FlexColumnWidth(1),
-            if (!showDate) 1: const FlexColumnWidth(1),
-            if (!showDate) 2: const FlexColumnWidth(1),
-            if (!showDate) 3: const FlexColumnWidth(1),
-            if (!showDate) 4: const FlexColumnWidth(1),
-            if (showDate) 3: const FlexColumnWidth(1),
-          },
-          children: [
-            TableRow(
-              decoration: const BoxDecoration(
-                border: Border(bottom: BorderSide(color: AppTheme.border))),
-              children: [
-                _th('EMPLOYEE'),
-                if (showDate) _th('DATE'),
-                _th('CHECK IN'),
-                _th('CHECK OUT'),
-                _th('HOURS'),
-                if (!showDate) _th('STATUS'),
-              ],
-            ),
-            ...logs.map((log) => TableRow(
-              decoration: const BoxDecoration(
-                border: Border(bottom: BorderSide(color: AppTheme.divider))),
-              children: [
-                _td(empName(log.employeeId)),
-                if (showDate) _td(log.date),
-                _td(fmt(log.inTime)),
-                _td(fmt(log.outTime)),
-                _tdHours(log.inTime, log.outTime),
-                if (!showDate) _tdStatus(
-                  log.outTime != null ? 'COMPLETE'
-                    : log.inTime != null ? 'IN' : '—',
-                  log.outTime != null ? AppTheme.success
-                    : log.inTime != null ? Colors.amber : AppTheme.accentGrey),
-              ],
-            )),
-          ],
+      padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 8),
+          child: BrandMark(size: 34, subtitle: 'Admin console'),
         ),
-      ),
+        const SizedBox(height: 32),
+        Padding(
+          padding: const EdgeInsets.only(left: 12, bottom: 8),
+          child: Text('MENU', style: AppTheme.overline),
+        ),
+        for (final p in _Page.values)
+          _NavItem(
+            icon: p.icon,
+            label: p == _Page.attendance ? 'Attendance' : p.title,
+            selected: _page == p,
+            onTap: () => setState(() => _page = p),
+          ),
+        const Spacer(),
+        const Divider(),
+        const SizedBox(height: 12),
+        Row(children: [
+          InitialsAvatar(admin, size: 36),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(admin, overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+              const Text('Administrator', style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
+            ]),
+          ),
+          IconButton(tooltip: 'Sign out', onPressed: _logout, icon: const Icon(Icons.logout, size: 20)),
+        ]),
+      ]),
     );
   }
 
-  Widget _th(String t) => Padding(
-    padding: const EdgeInsets.all(16),
-    child: Text(t, style: const TextStyle(fontSize: 10,
-      letterSpacing: 2, color: AppTheme.accentGrey, fontWeight: FontWeight.w600)));
-
-  Widget _td(String t) => Padding(
-    padding: const EdgeInsets.all(16),
-    child: Text(t, style: const TextStyle(
-      color: AppTheme.textPrimary, fontSize: 14)));
-
-  Widget _tdStatus(String t, Color c) => Padding(
-    padding: const EdgeInsets.all(16),
-    child: Text(t, style: TextStyle(color: c,
-      fontSize: 12, fontWeight: FontWeight.w600, letterSpacing: 1)));
-
-  Widget _tdHours(DateTime? inTime, DateTime? outTime) {
-    if (inTime == null || outTime == null) {
-      return const Padding(
-        padding: EdgeInsets.all(16),
-        child: Text('--:--', style: TextStyle(
-          color: AppTheme.accentGrey, fontSize: 14)));
-    }
-    final diff = outTime.difference(inTime);
-    final h    = diff.inHours.toString().padLeft(2, '0');
-    final m    = (diff.inMinutes % 60).toString().padLeft(2, '0');
+  Widget _topBar() {
     return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Text('${h}h ${m}m',
-        style: const TextStyle(
-          color: AppTheme.textPrimary, fontSize: 14)));
-  }
-}
-
-// ── Employee Table with Search ────────────────────────────
-class _EmployeeTableWithSearch extends StatefulWidget {
-  final List<Employee> employees;
-  final void Function(Employee) onRegisterFace;
-  const _EmployeeTableWithSearch(
-      {required this.employees, required this.onRegisterFace});
-
-  @override
-  State<_EmployeeTableWithSearch> createState() =>
-      _EmployeeTableWithSearchState();
-}
-
-class _EmployeeTableWithSearchState extends State<_EmployeeTableWithSearch> {
-  final _searchCtrl = TextEditingController();
-  String _query = '';
-
-  @override
-  void dispose() {
-    _searchCtrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final filtered = widget.employees.where((e) =>
-      e.name.toLowerCase().contains(_query) ||
-      e.username.toLowerCase().contains(_query) ||
-      e.role.toLowerCase().contains(_query),
-    ).toList();
-
-    return Column(
-      children: [
-        // Search bar
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          decoration: BoxDecoration(
-            color: AppTheme.card,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppTheme.border),
-          ),
-          child: Row(children: [
-            const Icon(Icons.search, color: AppTheme.accentGrey, size: 18),
-            const SizedBox(width: 12),
-            Expanded(
-              child: TextField(
-                controller: _searchCtrl,
-                style: const TextStyle(
-                  color: AppTheme.textPrimary, fontSize: 14),
-                decoration: const InputDecoration(
-                  hintText: 'Search by name, username or role...',
-                  hintStyle: TextStyle(
-                    color: AppTheme.accentGrey, fontSize: 13),
-                  border: InputBorder.none,
-                  isDense: true,
-                  contentPadding: EdgeInsets.zero,
-                ),
-                onChanged: (v) => setState(() => _query = v.toLowerCase()),
-              ),
-            ),
-            if (_query.isNotEmpty)
-              GestureDetector(
-                onTap: () {
-                  _searchCtrl.clear();
-                  setState(() => _query = '');
-                },
-                child: const Icon(Icons.close,
-                  color: AppTheme.accentGrey, size: 16),
-              ),
-            const SizedBox(width: 8),
-            Text('${filtered.length} of ${widget.employees.length}',
-              style: const TextStyle(
-                color: AppTheme.accentGrey, fontSize: 12)),
+      padding: const EdgeInsets.fromLTRB(32, 28, 32, 20),
+      child: Row(children: [
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(_page.title, style: AppTheme.h1),
+            const SizedBox(height: 4),
+            Row(children: [
+              Text(DateFormat('EEEE, d MMMM y').format(DateTime.now()), style: AppTheme.muted),
+              Text('  ·  ', style: AppTheme.muted),
+              const ClockWidget(large: false),
+            ]),
           ]),
         ),
-        const SizedBox(height: 12),
-        Expanded(
-          child: _EmployeeTable(
-            employees: filtered,
-            onRegisterFace: widget.onRegisterFace,
+        if (_loading)
+          const Padding(
+            padding: EdgeInsets.only(right: 12),
+            child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
           ),
+        IconButton(tooltip: 'Refresh', onPressed: _loading ? null : _loadData, icon: const Icon(Icons.refresh)),
+        const SizedBox(width: 8),
+        OutlinedButton.icon(
+          onPressed: _exportCSV,
+          icon: const Icon(Icons.download_outlined, size: 18),
+          label: const Text('Export CSV'),
         ),
+        const SizedBox(width: 12),
+        ElevatedButton.icon(
+          onPressed: _addEmployee,
+          icon: const Icon(Icons.person_add_alt_1_outlined, size: 18),
+          label: const Text('Add employee'),
+        ),
+      ]),
+    );
+  }
+
+  // ── Overview ─────────────────────────────────────────────
+
+  Widget _overview() {
+    final total = _employees.where((e) => e.isActive).length;
+    final present = _todayLogs.length;
+    final out = _todayLogs.where((l) => l.outTime != null).length;
+    final notIn = (total - present).clamp(0, total);
+    final noFace = _employees.where((e) => (_faceCounts[e.id] ?? 0) == 0).length;
+    final pct = total == 0 ? 0 : (present * 100 / total).round();
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      IntrinsicHeight(child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Expanded(child: StatCard(label: 'Team members', value: '$total',
+            icon: Icons.groups_outlined, tone: Tone.primary,
+            caption: noFace == 0 ? 'All faces registered' : '$noFace without a registered face')),
+        const SizedBox(width: AppTheme.gap),
+        Expanded(child: StatCard(label: 'Present today', value: '$present',
+            icon: Icons.how_to_reg_outlined, tone: Tone.success, caption: '$pct% of the team')),
+        const SizedBox(width: AppTheme.gap),
+        Expanded(child: StatCard(label: 'Checked out', value: '$out',
+            icon: Icons.logout, tone: Tone.neutral, caption: '${present - out} still working')),
+        const SizedBox(width: AppTheme.gap),
+        Expanded(child: StatCard(label: 'Not checked in', value: '$notIn',
+            icon: Icons.schedule_outlined, tone: notIn > 0 ? Tone.warning : Tone.neutral,
+            caption: 'As of ${DateFormat('h:mm a').format(DateTime.now())}')),
+      ])),
+      const SizedBox(height: 24),
+      _logTable(
+        _todayLogs,
+        header: _cardHeader("Today's activity", '${_todayLogs.length} check-ins'),
+        showDate: false,
+        empty: const EmptyState(icon: Icons.wb_sunny_outlined, title: 'No check-ins yet today',
+            message: 'People appear here as soon as they scan in at the kiosk.'),
+      ),
+    ]);
+  }
+
+  Widget _cardHeader(String title, String subtitle, {Widget? trailing}) => Row(children: [
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title, style: AppTheme.h3),
+            const SizedBox(height: 2),
+            Text(subtitle, style: AppTheme.muted),
+          ]),
+        ),
+        if (trailing != null) trailing,
+      ]);
+
+  Widget _logTable(List<AttendanceLog> logs,
+      {required Widget header, required bool showDate, required Widget empty}) {
+    final time = DateFormat('h:mm a');
+    return DataCard(
+      header: header,
+      empty: empty,
+      columns: [
+        const Col('Employee', flex: 3),
+        if (showDate) const Col('Date', flex: 2),
+        const Col('Check in', flex: 2),
+        const Col('Check out', flex: 2),
+        const Col('Hours', flex: 2),
+        const Col('Status', flex: 2),
+      ],
+      rows: [
+        for (final l in logs)
+          [
+            PersonCell(_empName(l.employeeId)),
+            if (showDate) Text(DateFormat('EEE, d MMM y').format(DateTime.parse(l.date)), style: AppTheme.body),
+            Text(l.inTime == null ? '—' : time.format(l.inTime!), style: AppTheme.body),
+            Text(l.outTime == null ? '—' : time.format(l.outTime!), style: AppTheme.body),
+            Text(_hours(l), style: AppTheme.body.copyWith(fontFeatures: AppTheme.tabular)),
+            l.outTime != null
+                ? const StatusBadge('Completed', tone: Tone.success)
+                : l.inTime != null
+                    ? (showDate && l.date != _day.format(DateTime.now())
+                        ? const StatusBadge('No check-out', tone: Tone.warning)
+                        : const StatusBadge('Working', tone: Tone.primary))
+                    : const StatusBadge('Absent', tone: Tone.danger),
+          ],
       ],
     );
   }
+
+  String _hours(AttendanceLog l) {
+    if (l.inTime == null || l.outTime == null) return '—';
+    final d = l.outTime!.difference(l.inTime!);
+    return '${d.inHours}h ${(d.inMinutes % 60).toString().padLeft(2, '0')}m';
+  }
+
+  // ── Attendance records ───────────────────────────────────
+
+  Widget _attendance() {
+    final fmt = DateFormat('d MMM y');
+    final rangeText = _range == null
+        ? 'All dates'
+        : '${fmt.format(_range!.start)} – ${fmt.format(_range!.end)}';
+    return _logTable(
+      _allLogs,
+      showDate: true,
+      header: _cardHeader('History', '${_allLogs.length} records · $rangeText',
+          trailing: Row(children: [
+            if (_range != null)
+              TextButton(
+                onPressed: () { setState(() => _range = null); _loadData(); },
+                child: const Text('Clear'),
+              ),
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              onPressed: _pickRange,
+              icon: const Icon(Icons.date_range_outlined, size: 18),
+              label: Text(rangeText),
+            ),
+          ])),
+      empty: const EmptyState(icon: Icons.event_busy_outlined, title: 'No records',
+          message: 'Try a different date range.'),
+    );
+  }
+
+  // ── Employees ────────────────────────────────────────────
+
+  Widget _employeesPage() => _EmployeesTable(
+        employees: _employees,
+        faceCounts: _faceCounts,
+        monthStats: _monthStats,
+        header: _cardHeader,
+        onRegister: (e) => _registerFace(e),
+        onReplace: (e) => _registerFace(e, replace: true),
+        onDelete: _deleteFaces,
+      );
 }
 
-// ── Employee Table ────────────────────────────────────────
-class _EmployeeTable extends StatefulWidget {
+// ── Sidebar item ─────────────────────────────────────────────
+
+class _NavItem extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  const _NavItem({required this.icon, required this.label, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(bottom: 4),
+        child: Material(
+          color: selected ? AppTheme.primarySoft : Colors.transparent,
+          borderRadius: BorderRadius.circular(AppTheme.radiusSm + 2),
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(AppTheme.radiusSm + 2),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+              child: Row(children: [
+                Icon(icon, size: 20, color: selected ? AppTheme.primary : AppTheme.textSecondary),
+                const SizedBox(width: 12),
+                Text(label, style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                    color: selected ? AppTheme.primary : AppTheme.textSecondary)),
+              ]),
+            ),
+          ),
+        ),
+      );
+}
+
+// ── Employees table ──────────────────────────────────────────
+
+class _EmployeesTable extends StatefulWidget {
   final List<Employee> employees;
-  final void Function(Employee) onRegisterFace;
-  const _EmployeeTable({required this.employees, required this.onRegisterFace});
+  final Map<int, int> faceCounts;
+  final Map<int, Map<String, dynamic>> monthStats;
+  final Widget Function(String, String, {Widget? trailing}) header;
+  final void Function(Employee) onRegister, onReplace, onDelete;
+  const _EmployeesTable({
+    required this.employees, required this.faceCounts, required this.monthStats,
+    required this.header, required this.onRegister, required this.onReplace, required this.onDelete,
+  });
 
   @override
-  State<_EmployeeTable> createState() => _EmployeeTableState();
+  State<_EmployeesTable> createState() => _EmployeesTableState();
 }
 
-class _EmployeeTableState extends State<_EmployeeTable> {
-  final Map<int, int>    _faceCounts   = {};
-  final Map<int, double> _attendance   = {};
-  final Map<int, String> _attendanceLbl = {};
-
-  @override
-  void initState() {
-    super.initState();
-    _loadFaceCounts();
-    _loadAttendance();
-  }
-
-  Future<void> _loadAttendance() async {
-    try {
-      final data = await ApiService.getAttendancePercentage();
-      if (mounted) {
-        setState(() {
-          for (final row in data) {
-            final id  = row['employee_id'] as int;
-            final pct = (row['percentage'] as num).toDouble();
-            final att = row['attended_days'] as int;
-            final wor = row['working_days']  as int;
-            _attendance[id]    = pct;
-            _attendanceLbl[id] = '$att/$wor days';
-          }
-        });
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _loadFaceCounts() async {
-    for (final emp in widget.employees) {
-      try {
-        final res = await ApiService.getFaceCount(emp.id);
-        if (mounted) {
-          setState(() => _faceCounts[emp.id] = res['total'] ?? 0);
-        }
-      } catch (_) {}
-    }
-  }
+class _EmployeesTableState extends State<_EmployeesTable> {
+  String _query = '';
 
   @override
   Widget build(BuildContext context) {
-    if (widget.employees.isEmpty) {
-      return const Center(
-      child: Text('No employees found.',
-        style: TextStyle(color: AppTheme.accentGrey)));
-    }
+    final q = _query.toLowerCase();
+    final list = widget.employees
+        .where((e) => e.name.toLowerCase().contains(q) || e.username.toLowerCase().contains(q))
+        .toList()
+      ..sort((a, b) => a.name.compareTo(b.name));
 
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.card,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.border),
-      ),
-      child: SingleChildScrollView(
-        child: Table(
-          columnWidths: const {
-            0: FlexColumnWidth(2),
-            1: FlexColumnWidth(2),
-            2: FlexColumnWidth(1),
-            3: FlexColumnWidth(1),
-            4: FlexColumnWidth(1.5),
-            5: FlexColumnWidth(2),
-          },
-          children: [
-            TableRow(
-              decoration: const BoxDecoration(
-                border: Border(bottom: BorderSide(color: AppTheme.border))),
-              children: ['NAME', 'USERNAME', 'ROLE', 'STATUS', 'THIS MONTH', 'FACE']
-                .map((h) => Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Text(h, style: const TextStyle(fontSize: 10,
-                    letterSpacing: 2, color: AppTheme.accentGrey,
-                    fontWeight: FontWeight.w600)),
-                )).toList(),
+    return DataCard(
+      header: widget.header(
+        'Team', '${widget.employees.length} people',
+        trailing: SizedBox(
+          width: 280,
+          child: TextField(
+            onChanged: (v) => setState(() => _query = v),
+            decoration: const InputDecoration(
+              hintText: 'Search by name or username',
+              prefixIcon: Icon(Icons.search, size: 20),
+              contentPadding: EdgeInsets.symmetric(vertical: 10),
             ),
-            ...widget.employees.map((e) {
-              final faceCount    = _faceCounts[e.id];
-              final isRegistered = (faceCount ?? 0) > 0;
-              final isLoading    = faceCount == null;
-
-              return TableRow(
-                decoration: const BoxDecoration(
-                  border: Border(bottom: BorderSide(color: AppTheme.divider))),
-                children: [
-                  Padding(padding: const EdgeInsets.all(16),
-                    child: Text(e.name, style: const TextStyle(
-                      color: AppTheme.textPrimary, fontSize: 14))),
-                  Padding(padding: const EdgeInsets.all(16),
-                    child: Text(e.username, style: const TextStyle(
-                      color: AppTheme.textSecondary, fontSize: 14))),
-                  Padding(padding: const EdgeInsets.all(16),
-                    child: Text(e.role.toUpperCase(), style: const TextStyle(
-                      color: AppTheme.accentGrey, fontSize: 12, letterSpacing: 1))),
-                  Padding(padding: const EdgeInsets.all(16),
-                    child: Text(e.isActive ? 'ACTIVE' : 'INACTIVE',
-                      style: TextStyle(fontSize: 12, letterSpacing: 1,
-                        color: e.isActive ? AppTheme.success : AppTheme.error))),
-
-                  // Attendance % cell
-                  Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: _attendance[e.id] == null
-                      ? const SizedBox(width: 14, height: 14,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2, color: AppTheme.accentGrey))
-                      : Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text('${_attendance[e.id]!.toStringAsFixed(1)}%',
-                              style: TextStyle(
-                                fontSize: 16, fontWeight: FontWeight.w600,
-                                color: _attendance[e.id]! >= 75
-                                  ? AppTheme.success
-                                  : _attendance[e.id]! >= 50
-                                    ? Colors.orange : AppTheme.error,
-                              )),
-                            const SizedBox(height: 2),
-                            Text(_attendanceLbl[e.id] ?? '',
-                              style: const TextStyle(
-                                fontSize: 10, color: AppTheme.accentGrey)),
-                            const SizedBox(height: 4),
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(4),
-                              child: LinearProgressIndicator(
-                                value: (_attendance[e.id]! / 100).clamp(0.0, 1.0),
-                                backgroundColor: AppTheme.border,
-                                valueColor: AlwaysStoppedAnimation(
-                                  _attendance[e.id]! >= 75
-                                    ? AppTheme.success
-                                    : _attendance[e.id]! >= 50
-                                      ? Colors.orange : AppTheme.error),
-                                minHeight: 4,
-                              ),
-                            ),
-                          ],
-                        ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                    child: isLoading
-                      ? const SizedBox(width: 16, height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2,
-                            color: AppTheme.accentGrey))
-                      : Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Row(children: [
-                              Icon(
-                                isRegistered
-                                  ? Icons.check_circle
-                                  : Icons.radio_button_unchecked,
-                                size: 13,
-                                color: isRegistered
-                                  ? AppTheme.success : AppTheme.accentGrey),
-                              const SizedBox(width: 4),
-                              Text(
-                                isRegistered
-                                  ? 'Registered ($faceCount imgs)'
-                                  : 'Not registered',
-                                style: TextStyle(fontSize: 11,
-                                  color: isRegistered
-                                    ? AppTheme.success : AppTheme.accentGrey)),
-                            ]),
-                            const SizedBox(height: 4),
-                            TextButton.icon(
-                              onPressed: () => widget.onRegisterFace(e),
-                              icon: Icon(
-                                isRegistered ? Icons.update : Icons.face,
-                                size: 13),
-                              label: Text(
-                                isRegistered ? 'Update Face' : 'Register Face',
-                                style: const TextStyle(fontSize: 11)),
-                              style: TextButton.styleFrom(
-                                foregroundColor: isRegistered
-                                  ? AppTheme.accent : AppTheme.accentGrey,
-                                padding: EdgeInsets.zero,
-                                minimumSize: Size.zero,
-                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                              ),
-                            ),
-                          ],
-                        ),
-                  ),
-                ],
-              );
-            }),
-          ],
+          ),
         ),
       ),
+      empty: EmptyState(
+        icon: Icons.person_search_outlined,
+        title: widget.employees.isEmpty ? 'No employees yet' : 'No matches',
+        message: widget.employees.isEmpty
+            ? 'Use "Add employee" to create the first account.'
+            : 'Nobody matches "$_query".',
+      ),
+      columns: const [
+        Col('Employee', flex: 4),
+        Col('Account', flex: 2),
+        Col('This month', flex: 3),
+        Col('Face', flex: 3),
+        Col('', flex: 3, alignEnd: true),
+      ],
+      rows: [for (final e in list) _row(e)],
+    );
+  }
+
+  List<Widget> _row(Employee e) {
+    final faces = widget.faceCounts[e.id] ?? 0;
+    final stats = widget.monthStats[e.id];
+    final pct = (stats?['percentage'] as num?)?.toDouble();
+    final tone = pct == null ? Tone.neutral : pct >= 75 ? Tone.success : pct >= 50 ? Tone.warning : Tone.danger;
+
+    return [
+      PersonCell(e.name, secondary: '@${e.username}'),
+      StatusBadge(e.isActive ? 'Active' : 'Disabled', tone: e.isActive ? Tone.success : Tone.neutral),
+      pct == null
+          ? const Text('—', style: TextStyle(color: AppTheme.textMuted))
+          : SizedBox(
+              width: 170,
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                Row(children: [
+                  Text('${pct.toStringAsFixed(0)}%', style: TextStyle(
+                      fontSize: 14, fontWeight: FontWeight.w600, color: tone.fg)),
+                  const SizedBox(width: 6),
+                  Text('${stats!['attended_days']}/${stats['working_days']} days',
+                      style: const TextStyle(fontSize: 12, color: AppTheme.textMuted)),
+                ]),
+                const SizedBox(height: 6),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value: (pct / 100).clamp(0.0, 1.0), minHeight: 6,
+                    color: tone.fg, backgroundColor: AppTheme.border,
+                  ),
+                ),
+              ]),
+            ),
+      faces > 0
+          ? StatusBadge('Registered · $faces photos', tone: Tone.success)
+          : const StatusBadge('Not registered', tone: Tone.warning),
+      faces == 0
+          ? ElevatedButton.icon(
+              onPressed: () => widget.onRegister(e),
+              icon: const Icon(Icons.center_focus_strong_outlined, size: 18),
+              label: const Text('Register face'),
+            )
+          : Row(mainAxisSize: MainAxisSize.min, children: [
+              OutlinedButton(onPressed: () => widget.onReplace(e), child: const Text('Re-register')),
+              PopupMenuButton<String>(
+                tooltip: 'More',
+                icon: const Icon(Icons.more_vert, color: AppTheme.textSecondary),
+                onSelected: (v) => v == 'add' ? widget.onRegister(e) : widget.onDelete(e),
+                itemBuilder: (_) => const [
+                  PopupMenuItem(value: 'add', child: ListTile(
+                      dense: true, contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.add_a_photo_outlined, size: 20), title: Text('Add more photos'))),
+                  PopupMenuItem(value: 'delete', child: ListTile(
+                      dense: true, contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.delete_outline, size: 20, color: AppTheme.danger),
+                      title: Text('Delete face data', style: TextStyle(color: AppTheme.danger)))),
+                ],
+              ),
+            ]),
+    ];
+  }
+}
+
+// ── Add employee dialog ──────────────────────────────────────
+
+class _AddEmployeeDialog extends StatefulWidget {
+  const _AddEmployeeDialog();
+  @override
+  State<_AddEmployeeDialog> createState() => _AddEmployeeDialogState();
+}
+
+class _AddEmployeeDialogState extends State<_AddEmployeeDialog> {
+  final _name = TextEditingController();
+  final _user = TextEditingController();
+  final _pass = TextEditingController();
+  String _role = 'user';
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _name.dispose(); _user.dispose(); _pass.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    setState(() { _saving = true; _error = null; });
+    try {
+      await ApiService.registerEmployee(_name.text.trim(), _user.text.trim(), _pass.text, _role);
+      if (mounted) Navigator.pop(context, _name.text.trim());
+    } on ApiException catch (e) {
+      setState(() => _error = e.statusCode == 422
+          ? 'Please fill every field. Usernames need 2+ characters and passwords 6+.'
+          : e.message);
+    } catch (_) {
+      setState(() => _error = 'Could not reach the server.');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Widget _field(String label, TextEditingController c, {bool secret = false, String? hint, IconData? icon}) =>
+      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(label, style: AppTheme.label),
+        const SizedBox(height: 6),
+        TextField(
+          controller: c, obscureText: secret,
+          decoration: InputDecoration(hintText: hint, prefixIcon: icon == null ? null : Icon(icon, size: 20)),
+        ),
+      ]);
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+      title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Add employee'),
+        const SizedBox(height: 4),
+        Text('They can sign in at the kiosk once their face is registered.', style: AppTheme.muted),
+      ]),
+      content: SizedBox(
+        width: 420,
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          const SizedBox(height: 8),
+          _field('Full name', _name, hint: 'e.g. Priya Raman', icon: Icons.badge_outlined),
+          const SizedBox(height: 16),
+          _field('Username', _user, hint: 'e.g. priya', icon: Icons.alternate_email),
+          const SizedBox(height: 16),
+          _field('Password', _pass, secret: true, hint: 'At least 6 characters', icon: Icons.lock_outline),
+          const SizedBox(height: 16),
+          Text('Role', style: AppTheme.label),
+          const SizedBox(height: 6),
+          SegmentedButton<String>(
+            segments: const [
+              ButtonSegment(value: 'user', label: Text('Employee'), icon: Icon(Icons.person_outline)),
+              ButtonSegment(value: 'admin', label: Text('Admin'), icon: Icon(Icons.admin_panel_settings_outlined)),
+            ],
+            selected: {_role},
+            showSelectedIcon: false,
+            onSelectionChanged: (s) => setState(() => _role = s.first),
+          ),
+          if (_error != null) ...[const SizedBox(height: 16), InfoBanner(_error!)],
+        ]),
+      ),
+      actionsPadding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
+      actions: [
+        OutlinedButton(onPressed: _saving ? null : () => Navigator.pop(context), child: const Text('Cancel')),
+        ElevatedButton(
+          onPressed: _saving ? null : _save,
+          child: _saving
+              ? const SizedBox(width: 18, height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              : const Text('Add employee'),
+        ),
+      ],
     );
   }
 }

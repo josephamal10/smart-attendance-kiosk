@@ -6,12 +6,12 @@ import 'package:technerdz_app/screens/lock_screen.dart';
 
 void main() {
   testWidgets('Lock screen shows brand and hint', (tester) async {
-    // Plain MaterialApp (not AppTheme) so the test doesn't download Google Fonts
+    // Plain MaterialApp keeps the test independent of the theme
     await tester.pumpWidget(const MaterialApp(home: LockScreen()));
     await tester.pump(const Duration(seconds: 2)); // let the fade-in finish
 
     expect(find.text('TECHNERDZ'), findsOneWidget);
-    expect(find.text('CLICK OR PRESS ANY KEY TO CONTINUE'), findsOneWidget);
+    expect(find.text('Tap anywhere to check in or out'), findsOneWidget);
   });
 
   test('Employee parses the public login list (no role / is_active)', () {

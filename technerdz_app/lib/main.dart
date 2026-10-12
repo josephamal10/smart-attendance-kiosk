@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:camera_windows/camera_windows.dart';
@@ -11,7 +12,8 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  CameraWindows.registerWith();
+  // Native camera plugin only on Windows (the web build is used for UI previews/screenshots)
+  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) CameraWindows.registerWith();
   runApp(const TechnerdzApp());
 }
 

@@ -3,20 +3,21 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../theme/app_theme.dart';
 
+/// Live clock. `large` is the kiosk welcome screen; otherwise a compact one-liner.
 class ClockWidget extends StatefulWidget {
-  const ClockWidget({super.key});
+  final bool large;
+  const ClockWidget({super.key, this.large = true});
   @override
   State<ClockWidget> createState() => _ClockWidgetState();
 }
 
 class _ClockWidgetState extends State<ClockWidget> {
   late Timer _timer;
-  late DateTime _now;
+  DateTime _now = DateTime.now();
 
   @override
   void initState() {
     super.initState();
-    _now = DateTime.now();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       setState(() => _now = DateTime.now());
     });
@@ -30,53 +31,35 @@ class _ClockWidgetState extends State<ClockWidget> {
 
   @override
   Widget build(BuildContext context) {
-    final time = DateFormat('HH:mm').format(_now);
-    final secs = DateFormat('ss').format(_now);
-    final date = DateFormat('MMMM d, yyyy').format(_now);
-    final day  = DateFormat('EEEE').format(_now).toUpperCase();
+    if (!widget.large) {
+      return Text(DateFormat('h:mm a').format(_now),
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600,
+              color: AppTheme.textPrimary, fontFeatures: AppTheme.tabular));
+    }
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // Time
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Text(time, style: Theme.of(context).textTheme.displayLarge),
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Text(' :$secs',
-                style: const TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.w300,
-                  color: AppTheme.accentGrey,
-                  letterSpacing: 1,
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        // Day
-        Text(day,
-          style: const TextStyle(
-            fontSize: 13,
-            letterSpacing: 6,
-            color: AppTheme.accentGrey,
-            fontWeight: FontWeight.w400,
-          ),
-        ),
-        const SizedBox(height: 4),
-        // Date
-        Text(date,
-          style: const TextStyle(
-            fontSize: 16,
-            color: AppTheme.textSecondary,
-            fontWeight: FontWeight.w300,
-          ),
-        ),
-      ],
-    );
+    return Column(mainAxisSize: MainAxisSize.min, children: [
+      Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.baseline,
+        textBaseline: TextBaseline.alphabetic,
+        children: [
+          Text(DateFormat('h:mm').format(_now),
+              style: const TextStyle(fontSize: 120, fontWeight: FontWeight.w600,
+                  height: 1, letterSpacing: -5, color: AppTheme.textPrimary,
+                  fontFeatures: AppTheme.tabular)),
+          const SizedBox(width: 14),
+          Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+            Text(DateFormat('a').format(_now),
+                style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w600, color: AppTheme.primary)),
+            Text(DateFormat('ss').format(_now),
+                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w500,
+                    color: AppTheme.textMuted, fontFeatures: AppTheme.tabular)),
+          ]),
+        ],
+      ),
+      const SizedBox(height: 16),
+      Text(DateFormat('EEEE, d MMMM y').format(_now),
+          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w500, color: AppTheme.textSecondary)),
+    ]);
   }
 }

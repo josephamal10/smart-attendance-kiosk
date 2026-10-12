@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import '../theme/app_theme.dart';
 import '../services/api_service.dart';
+import '../widgets/camera_stage.dart';
+import '../widgets/ui.dart';
 import 'lock_screen.dart';
 
 class FaceVerifyScreen extends StatefulWidget {
@@ -33,6 +35,7 @@ class _FaceVerifyScreenState extends State<FaceVerifyScreen>
   bool _closing    = false;
   String _status   = _blinkPrompt;
   String? _error;
+  bool _noCamera = false;
   String? _action;
   DateTime? _actionTime;
   int _autoLogout  = 3;
@@ -47,19 +50,32 @@ class _FaceVerifyScreenState extends State<FaceVerifyScreen>
     super.initState();
     _blinkCtrl = AnimationController(
       vsync: this, duration: const Duration(milliseconds: 500));
-    _blinkAnim = Tween<double>(begin: 1.0, end: 0.0).animate(_blinkCtrl);
+    _blinkAnim = Tween<double>(begin: 1.0, end: 0.85).animate(_blinkCtrl); // gentle pulse on the result card
     _initCamera();
   }
 
   Future<void> _initCamera() async {
-    final cameras = await availableCameras();
+    final List<CameraDescription> cameras;
+    try {
+      cameras = await availableCameras();
+    } catch (_) {
+      if (mounted) setState(() => _noCamera = true);
+      return;
+    }
     if (!mounted || _closing) return;
     if (cameras.isEmpty) {
-      setState(() => _error = 'No camera found.');
+      setState(() => _noCamera = true);
       return;
     }
     _cam = CameraController(cameras.first, ResolutionPreset.medium);
-    await _cam!.initialize();
+    try {
+      await _cam!.initialize();
+    } catch (_) {
+      // e.g. camera in use by another app, or permission denied
+      _cam = null;
+      if (mounted) setState(() => _noCamera = true);
+      return;
+    }
     if (mounted) {
       setState(() {});
       _startBlinkDetection();
@@ -219,316 +235,128 @@ class _FaceVerifyScreenState extends State<FaceVerifyScreen>
   }
 
   Color get _actionColor => switch (_action) {
-    'in'  => AppTheme.success,
-    'out' => AppTheme.error,
-    _     => AppTheme.accentGrey,   // done / too_soon: nothing changed
+    'in'       => AppTheme.success,
+    'out'      => AppTheme.primary,   // leaving isn't an error, so not red
+    'too_soon' => AppTheme.warning,
+    _          => AppTheme.textSecondary,
   };
   IconData get _actionIcon => switch (_action) {
-    'in'  => Icons.login,
-    'out' => Icons.logout,
-    _     => Icons.info_outline,
+    'in'       => Icons.login_rounded,
+    'out'      => Icons.logout_rounded,
+    'too_soon' => Icons.schedule_rounded,
+    _          => Icons.task_alt_rounded,
   };
   String get _actionLabel => switch (_action) {
-    'in'       => 'CHECKED IN',
-    'out'      => 'CHECKED OUT',
-    'too_soon' => 'ALREADY IN',
-    _          => 'ALL DONE TODAY',
+    'in'       => 'Checked in',
+    'out'      => 'Checked out',
+    'too_soon' => 'Already checked in',
+    _          => 'All done for today',
   };
 
   @override
   Widget build(BuildContext context) {
+    final name = ApiService.name ?? '';
+    final step = _verified ? 3 : _blinkDetected || _verifying ? 2 : 1;
+
     return Scaffold(
-      backgroundColor: AppTheme.background,
-      body: Row(
-        children: [
-          // ── Camera ───────────────────────────────────
-          Expanded(
-            flex: 3,
-            child: Stack(
-              children: [
-                // Camera preview
-                if (_cam != null && _cam!.value.isInitialized)
-                  SizedBox.expand(
-                    child: FittedBox(
-                      fit: BoxFit.cover,
-                      child: SizedBox(
-                        width: _cam!.value.previewSize!.height,
-                        height: _cam!.value.previewSize!.width,
-                        child: CameraPreview(_cam!),
-                      ),
-                    ),
-                  )
-                else
-                  Container(
-                    color: AppTheme.surface,
-                    child: const Center(
-                      child: CircularProgressIndicator(
-                          color: AppTheme.accent)),
-                  ),
-
-                // Face oval
-                if (!_verified)
-                  Positioned.fill(
-                    child: LayoutBuilder(
-                      builder: (ctx, constraints) {
-                        final w = constraints.maxWidth  * 0.55;
-                        final h = constraints.maxHeight * 0.82;
-                        return Center(
-                          child: Container(
-                            width: w, height: h,
-                            decoration: BoxDecoration(
-                              border: Border.all(
-                                color: _blinkDetected
-                                  ? AppTheme.success : Colors.white70,
-                                width: 2.5),
-                              borderRadius: BorderRadius.circular(w / 2),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-
-                // Blink indicator
-                if (!_verified && !_verifying)
-                  Positioned(
-                    top: 24, left: 0, right: 0,
-                    child: Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 20, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: Colors.black54,
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  _blinkDetected
-                                    ? Icons.check_circle
-                                    : Icons.remove_red_eye_outlined,
-                                  color: _blinkDetected
-                                    ? AppTheme.success : Colors.white,
-                                  size: 16,
-                                ),
-                                const SizedBox(width: 8),
-                                Text(_status,
-                                  style: const TextStyle(
-                                    color: Colors.white, fontSize: 14)),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-
-                // Verifying indicator
-                if (_verifying)
-                  Positioned(
-                    top: 24, left: 0, right: 0,
-                    child: Center(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 20, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: Colors.black54,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            SizedBox(width: 14, height: 14,
-                              child: CircularProgressIndicator(
-                                color: Colors.white, strokeWidth: 2)),
-                            SizedBox(width: 10),
-                            Text('Verifying face...',
-                              style: TextStyle(
-                                color: Colors.white, fontSize: 14)),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-
-                // Check in/out blink overlay
-                if (_verified)
-                  FadeTransition(
-                    opacity: _blinkAnim,
-                    child: Container(
-                      color: _actionColor.withValues(alpha: 0.15),
-                      child: Center(
-                        child: Container(
-                          padding: const EdgeInsets.all(24),
-                          decoration: BoxDecoration(
-                            color: Colors.black87,
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: _actionColor, width: 2),
-                          ),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(_actionIcon,
-                                color: _actionColor, size: 64),
-                              const SizedBox(height: 16),
-                              Text(_actionLabel,
-                                style: TextStyle(
-                                  color: _actionColor, fontSize: 28,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 4)),
-                              const SizedBox(height: 12),
-                              Text(_formatTime(_actionTime),
-                                style: TextStyle(
-                                  color: _actionColor, fontSize: 36,
-                                  fontWeight: FontWeight.w300,
-                                  letterSpacing: 2)),
-                              const SizedBox(height: 8),
-                              Text(_status,
-                                style: const TextStyle(
-                                  color: Colors.white70, fontSize: 14),
-                                textAlign: TextAlign.center),
-                              const SizedBox(height: 16),
-                              Text('Returning in $_autoLogout...',
-                                style: const TextStyle(
-                                  color: Colors.white38, fontSize: 12)),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-
-                // Error
-                if (_error != null)
-                  Positioned(
-                    bottom: 32, left: 0, right: 0,
-                    child: Center(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 20, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: AppTheme.error.withValues(alpha: 0.85),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(_error!,
-                          style: const TextStyle(
-                            color: Colors.white, fontSize: 13)),
-                      ),
-                    ),
-                  ),
-              ],
+      backgroundColor: AppTheme.ink,
+      body: Row(children: [
+        Expanded(
+          child: CameraStage(
+            controller: _cam,
+            unavailableMessage: _noCamera ? 'No camera found on this device' : null,
+            showGuide: !_verified,
+            guideColor: _blinkDetected ? AppTheme.success : Colors.white,
+            top: _verified
+                ? null
+                : _verifying
+                    ? const CameraPill('Verifying your face...',
+                        leading: SizedBox(width: 16, height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)))
+                    : CameraPill(_status,
+                        leading: Icon(
+                            _blinkDetected ? Icons.check_circle : Icons.visibility_outlined,
+                            color: _blinkDetected ? AppTheme.success : Colors.white, size: 20)),
+            center: _verified ? _resultCard(name) : null,
+            bottom: _error != null && !_verified
+                ? CameraPill(_error!, color: AppTheme.danger,
+                    leading: const Icon(Icons.error_outline, color: Colors.white, size: 18))
+                : null,
+          ),
+        ),
+        SidePanel(children: [
+          Text('IDENTITY CHECK', style: AppTheme.overline),
+          const SizedBox(height: 16),
+          Row(children: [
+            InitialsAvatar(name, size: 44),
+            const SizedBox(width: 12),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(name, style: AppTheme.h2, overflow: TextOverflow.ellipsis),
+              Text(widget.role == 'admin' ? 'Administrator' : 'Employee', style: AppTheme.muted),
+            ])),
+          ]),
+          const SizedBox(height: 32),
+          StepRow(number: 1, title: 'Position your face',
+              subtitle: 'Fit your face inside the oval', done: step > 1, active: step == 1),
+          const SizedBox(height: 20),
+          StepRow(number: 2, title: 'Blink once',
+              subtitle: 'Proves a real person is in front of the camera', done: step > 2, active: step == 1),
+          const SizedBox(height: 20),
+          StepRow(number: 3, title: 'Face match',
+              subtitle: 'Checked against your registered photos', done: _verified, active: step == 2),
+          const Spacer(),
+          const Row(children: [
+            Icon(Icons.lock_outline, size: 16, color: AppTheme.textMuted),
+            SizedBox(width: 8),
+            Expanded(child: Text('Photos are used only to verify you and are not stored.',
+                style: TextStyle(fontSize: 12, color: AppTheme.textMuted))),
+          ]),
+          const SizedBox(height: 16),
+          SizedBox(
+            height: 46,
+            child: OutlinedButton(
+              onPressed: _verified ? null : _closeWithoutSaving,
+              child: const Text('Cancel'),
             ),
           ),
+        ]),
+      ]),
+    );
+  }
 
-          // ── Info Panel ────────────────────────────────
+  Widget _resultCard(String name) {
+    final c = _actionColor;
+    return FadeTransition(
+      opacity: _blinkAnim,
+      child: Container(
+        width: 380,
+        padding: const EdgeInsets.fromLTRB(32, 32, 32, 24),
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 40, offset: Offset(0, 16))],
+        ),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
           Container(
-            width: 280,
-            decoration: const BoxDecoration(
-              color: AppTheme.surface,
-              border: Border(left: BorderSide(color: AppTheme.border)),
-            ),
-            padding: const EdgeInsets.all(32),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('TECHNERDZ', style: TextStyle(
-                  fontSize: 11, letterSpacing: 6,
-                  color: AppTheme.accentGrey)),
-                const SizedBox(height: 32),
-                const Divider(),
-                const SizedBox(height: 24),
-                const Text('FACE VERIFICATION', style: TextStyle(
-                  fontSize: 10, letterSpacing: 3,
-                  color: AppTheme.accentGrey)),
-                const SizedBox(height: 12),
-                Text(ApiService.name ?? '', style: const TextStyle(
-                  fontSize: 22, fontWeight: FontWeight.w600,
-                  color: AppTheme.textPrimary)),
-                const SizedBox(height: 4),
-                Text(widget.role.toUpperCase(), style: const TextStyle(
-                  fontSize: 10, letterSpacing: 3,
-                  color: AppTheme.accentGrey)),
-                const SizedBox(height: 32),
-                const Divider(),
-                const SizedBox(height: 24),
-
-                _Instruction(
-                  step: '1',
-                  text: 'Position your face inside the oval',
-                  done: _blinkDetected || _verified,
-                ),
-                const SizedBox(height: 16),
-                _Instruction(
-                  step: '2',
-                  text: 'Blink naturally to confirm liveness',
-                  done: _blinkDetected || _verified,
-                ),
-                const SizedBox(height: 16),
-                _Instruction(
-                  step: '3',
-                  text: 'Face recognition runs automatically',
-                  done: _verified,
-                ),
-
-                const Spacer(),
-                const Divider(),
-                const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppTheme.accentGrey,
-                      side: const BorderSide(color: AppTheme.border),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
-                    onPressed: _verified ? null : _closeWithoutSaving,
-                    child: const Text('CANCEL',
-                      style: TextStyle(letterSpacing: 2, fontSize: 12)),
-                  ),
-                ),
-              ],
-            ),
+            width: 72, height: 72,
+            decoration: BoxDecoration(color: c.withValues(alpha: 0.12), shape: BoxShape.circle),
+            child: Icon(_actionIcon, color: c, size: 36),
           ),
-        ],
+          const SizedBox(height: 18),
+          Text(_actionLabel, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: c)),
+          const SizedBox(height: 6),
+          Text(_formatTime(_actionTime), style: const TextStyle(
+              fontSize: 40, fontWeight: FontWeight.w700, letterSpacing: -1.2,
+              color: AppTheme.textPrimary, fontFeatures: AppTheme.tabular)),
+          const SizedBox(height: 8),
+          Text(_status, textAlign: TextAlign.center, style: AppTheme.muted),
+          const SizedBox(height: 20),
+          const Divider(),
+          const SizedBox(height: 12),
+          Text('Returning to the start screen in $_autoLogout s',
+              style: const TextStyle(fontSize: 12, color: AppTheme.textMuted)),
+        ]),
       ),
     );
   }
-}
-
-class _Instruction extends StatelessWidget {
-  final String step, text;
-  final bool done;
-  const _Instruction(
-      {required this.step, required this.text, required this.done});
-
-  @override
-  Widget build(BuildContext context) => Row(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Container(
-        width: 24, height: 24,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: done ? AppTheme.success : AppTheme.border,
-        ),
-        child: Center(
-          child: done
-            ? const Icon(Icons.check, size: 14, color: Colors.white)
-            : Text(step, style: const TextStyle(
-                fontSize: 11, color: AppTheme.accentGrey,
-                fontWeight: FontWeight.w600)),
-        ),
-      ),
-      const SizedBox(width: 12),
-      Expanded(
-        child: Text(text, style: const TextStyle(
-          color: AppTheme.textSecondary, fontSize: 13, height: 1.6)),
-      ),
-    ],
-  );
 }

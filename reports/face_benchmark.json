@@ -1,0 +1,30 @@
+[
+  {
+    "engine": "dlib (face_recognition)",
+    "accuracy_mean": 0.985,
+    "accuracy_std": 0.0,
+    "threshold_mean": 0.6239787117690639,
+    "tar_at_far_1%": 0.9766666666666667,
+    "threshold_far_1%": 0.641934938136542,
+    "tar_at_far_0.1%": 0.9666666666666667,
+    "threshold_far_0.1%": 0.60628296903169,
+    "images_without_face": 4,
+    "pairs_affected": 6,
+    "pairs": 600,
+    "ms_per_1080p_frame": 1391.1663499980932
+  },
+  {
+    "engine": "YuNet + SFace (OpenCV Zoo)",
+    "accuracy_mean": 0.9883333333333333,
+    "accuracy_std": 0.0,
+    "threshold_mean": 0.3397011160850525,
+    "tar_at_far_1%": 0.98,
+    "threshold_far_1%": 0.2876163125038147,
+    "tar_at_far_0.1%": 0.9766666666666667,
+    "threshold_far_0.1%": 0.3330535888671875,
+    "images_without_face": 0,
+    "pairs_affected": 0,
+    "pairs": 600,
+    "ms_per_1080p_frame": 43.930729999556206
+  }
+]

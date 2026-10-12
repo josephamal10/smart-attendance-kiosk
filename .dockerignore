@@ -1,0 +1,12 @@
+.venv/
+.git/
+technerdz_app/
+data/
+runs/
+reports/
+face_images/
+*.db
+.env
+**/__pycache__/
+models/antispoof/*.pth
+models/antispoof/*.int8.onnx

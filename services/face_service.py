@@ -1,4 +1,3 @@
-import io
 import json
 import logging
 import os
@@ -6,7 +5,6 @@ import threading
 import uuid
 
 import cv2
-import face_recognition
 import mediapipe as mp
 import numpy as np
 from mediapipe.tasks import python as mp_python
@@ -16,14 +14,16 @@ from sqlalchemy.orm import Session
 
 from models import FaceImage, Employee
 from services import antispoof_service
+from services.face_engine import cosine_similarity, get_engine
 
 log = logging.getLogger("technerdz.face")
 
 FACE_IMAGE_DIR = "face_images"
 os.makedirs(FACE_IMAGE_DIR, exist_ok=True)
 
-# Lower = stricter. 0.6 is face_recognition's default; 0.5 cuts false matches further.
-MATCH_TOLERANCE = float(os.getenv("FACE_MATCH_TOLERANCE", 0.5))
+# SFace cosine similarity needed to accept a match (higher = stricter). Chosen from the
+# LFW benchmark (ml/face_benchmark.py) at a 0.1% false-match rate.
+MATCH_THRESHOLD = float(os.getenv("FACE_MATCH_THRESHOLD", 0.40))
 
 # Eye landmark indices (MediaPipe 478 landmarks)
 LEFT_EYE  = [362, 385, 387, 263, 373, 380]
@@ -109,20 +109,23 @@ def _single_face_encoding(image_bytes: bytes, check_spoof: bool = True) -> tuple
     With check_spoof, the anti-spoofing model must also judge the face as a live person
     (not a print, phone or monitor) — otherwise anyone could register or check in with
     someone else's photo."""
-    image = face_recognition.load_image_file(io.BytesIO(image_bytes))
-    locations = face_recognition.face_locations(image)
-    if len(locations) == 0:
+    img = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
+    if img is None:
+        return None, "Invalid image"
+    engine = get_engine()
+    faces = engine.detect(img)
+    if len(faces) == 0:
         return None, "No face detected. Please try again."
-    if len(locations) > 1:
+    if len(faces) > 1:
         return None, "More than one face detected. Only one person should be in frame."
 
     if check_spoof and antispoof_service.is_enabled():
-        is_real, score = antispoof_service.check(image, locations[0])
+        is_real, score = antispoof_service.check(img, faces[0].box)
         log.info("anti-spoof P(real)=%.3f -> %s", score, "real" if is_real else "SPOOF")
         if not is_real:
             return None, SPOOF_MESSAGE
 
-    return face_recognition.face_encodings(image, known_face_locations=locations)[0], "OK"
+    return engine.embed(img, faces[0]), "OK"
 
 
 def save_face_image(db: Session, employee_id: int, direction: str,
@@ -159,18 +162,19 @@ def get_face_count_by_employee(db: Session, employee_id: int) -> int:
 
 
 def verify_face(db: Session, image_bytes: bytes, employee_id: int,
-                tolerance: float = MATCH_TOLERANCE) -> tuple[Employee | None, str]:
+                threshold: float = MATCH_THRESHOLD) -> tuple[Employee | None, str]:
     """1:1 check — does this photo match the stored faces of `employee_id`?"""
     rows = db.query(FaceImage).filter(FaceImage.employee_id == employee_id).all()
     if not rows:
         return None, "No faces registered yet. Ask admin to register your face first."
 
-    unknown_enc, msg = _single_face_encoding(image_bytes)
-    if unknown_enc is None:
+    probe, msg = _single_face_encoding(image_bytes)
+    if probe is None:
         return None, msg
 
-    known_encs = [np.array(json.loads(r.embedding)) for r in rows]
-    best_dist  = float(np.min(face_recognition.face_distance(known_encs, unknown_enc)))
-    if best_dist <= tolerance:
+    known = np.array([json.loads(r.embedding) for r in rows])
+    best = float(np.max(cosine_similarity(known, probe)))
+    log.info("face match: best cosine %.3f (threshold %.2f)", best, threshold)
+    if best >= threshold:
         return db.get(Employee, employee_id), "OK"
     return None, "Face not recognized. Please try again."

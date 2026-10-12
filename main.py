@@ -6,12 +6,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from database import init_db
 from routes import auth_routes, face_routes, attendance_routes, admin_routes
 from services import antispoof_service
+from services.face_engine import get_engine
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
 init_db()
+# Load models at startup so a missing file fails now, not at the first check-in
+get_engine()
 if antispoof_service.is_enabled():
-    antispoof_service.get_model()  # fail at startup, not at the first check-in, if models are missing
+    antispoof_service.get_model()
 
 app = FastAPI(
     title="TECHNERDZ Attendance System API",

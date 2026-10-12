@@ -40,7 +40,7 @@ Int8 made the files 2.6× smaller, but it wasn't faster on CPU for these tiny de
 it moved scores noticeably, **so the server runs fp32**. Measuring before deciding mattered here.
 
 **Face-box calibration.** The models were trained on loose RetinaFace boxes; dlib's
-box is tight. On 126 real webcam captures, the lowest P(real) was:
+box is tight. On 126 real webcam captures (dlib era), the lowest P(real) was:
 
 | box | min P(real) | mean |
 |---|---|---|
@@ -48,9 +48,15 @@ box is tight. On 126 real webcam captures, the lowest P(real) was:
 | +10% width, +25% height (mostly upward) ← used | **0.859** | 0.971 |
 | +20% / +30% | 0.697 | 0.958 |
 
+When face detection moved from dlib to YuNet, that framing was carried over by measuring
+where the tuned box sits relative to YuNet's box on 1,743 LFW faces both detectors found
+(`calibrate_box.py`): offset (-0.141, -0.050) and scale (1.223, 1.039) of the YuNet box, with an
+interquartile range of only ~0.1, so the mapping is stable.
+
 **Bona fide error (BPCER).** On 126 real captures at threshold 0.5: **0.0%**
-([report](../../reports/antispoof/pretrained-real-only/)). End-to-end, anti-spoofing adds
-**~7 ms** to a ~1.5 s check-in.
+([report](../../reports/antispoof/pretrained-real-only/), dlib-era boxes; those captures were
+deleted when faces were reset, so re-run `evaluate.py` on the new registrations).
+Anti-spoofing adds **~7 ms** per check-in.
 
 **Attack error (APCER): not measured yet.** That needs real attack recordings, step 1 below.
 Until then, the honest claim is "doesn't reject real users", not "stops attacks".

@@ -144,7 +144,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     letterSpacing: 2, color: AppTheme.accentGrey)),
                   const SizedBox(height: 8),
                   DropdownButtonFormField<Employee>(
-                    value: _selected,
+                    initialValue: _selected,
                     dropdownColor: AppTheme.surface,
                     style: const TextStyle(color: AppTheme.textPrimary),
                     hint: const Text('Select your name',

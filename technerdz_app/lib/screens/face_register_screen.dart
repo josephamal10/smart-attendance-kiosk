@@ -269,7 +269,7 @@ class _FaceRegisterScreenState extends State<FaceRegisterScreen> {
 
                 // Flash effect
                 if (_capturing)
-                  Container(color: Colors.white.withOpacity(0.15)),
+                  Container(color: Colors.white.withValues(alpha: 0.15)),
 
                 // Status label
                 Positioned(
@@ -298,7 +298,7 @@ class _FaceRegisterScreenState extends State<FaceRegisterScreen> {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 20, vertical: 8),
                         decoration: BoxDecoration(
-                          color: AppTheme.error.withOpacity(0.8),
+                          color: AppTheme.error.withValues(alpha: 0.8),
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Text(_error!,
@@ -451,7 +451,7 @@ class _FaceRegisterScreenState extends State<FaceRegisterScreen> {
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: AppTheme.success.withOpacity(0.1),
+                      color: AppTheme.success.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(color: AppTheme.success),
                     ),

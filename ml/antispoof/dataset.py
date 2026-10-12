@@ -10,7 +10,7 @@ Folder dataset shared by evaluate.py and finetune.py.
 session, never by frame: neighbouring frames are near-identical, so mixing them across
 train/test would make the scores look far better than reality.
 
-Faces are located once with face_recognition and cached in boxes.json next to the data.
+Faces are located once with YuNet (services/face_engine.py) and cached in boxes.json next to the data.
 """
 import glob
 import json
@@ -19,7 +19,7 @@ from dataclasses import dataclass
 
 import cv2
 
-from services.antispoof_service import box_from_trbl
+from services.antispoof_service import box_from_yunet
 
 LABELS = ("real", "print", "replay")
 # Model output classes (from the original training): 0 = print, 1 = real, 2 = replay
@@ -40,8 +40,9 @@ def session_of(path: str) -> str:
 
 def load(root: str) -> tuple[list[Sample], int]:
     """Return (samples with exactly one face, number of images skipped)."""
-    import face_recognition
+    from services.face_engine import get_engine
 
+    engine = get_engine()
     cache_path = os.path.join(root, "boxes.json")
     cache = {}
     if os.path.exists(cache_path):
@@ -53,14 +54,13 @@ def load(root: str) -> tuple[list[Sample], int]:
         for path in sorted(glob.glob(os.path.join(root, label, "*.jpg"))):
             key = os.path.relpath(path, root).replace("\\", "/")
             if key not in cache:
-                rgb = face_recognition.load_image_file(path)
-                cache[key] = face_recognition.face_locations(rgb)
+                cache[key] = [list(map(float, f.box)) for f in engine.detect(read_bgr(path))]
                 dirty = True
-            locs = cache[key]
-            if len(locs) != 1:
+            boxes = cache[key]
+            if len(boxes) != 1:
                 skipped += 1
                 continue
-            samples.append(Sample(path, label, session_of(path), box_from_trbl(*locs[0])))
+            samples.append(Sample(path, label, session_of(path), box_from_yunet(boxes[0])))
 
     if dirty:
         with open(cache_path, "w", encoding="utf-8") as f:

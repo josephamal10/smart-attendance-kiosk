@@ -72,7 +72,9 @@ class _FaceVerifyScreenState extends State<FaceVerifyScreen>
     _blinkTimer?.cancel();
     _blinkTimer = Timer.periodic(const Duration(milliseconds: 150), (_) async {
       if (_closing || _blinkDetected || _checkingBlink || _cam == null ||
-          !_cam!.value.isInitialized) return;
+          !_cam!.value.isInitialized) {
+        return;
+      }
       _checkingBlink = true;
       try {
         final xFile = await _cam!.takePicture();
@@ -358,7 +360,7 @@ class _FaceVerifyScreenState extends State<FaceVerifyScreen>
                   FadeTransition(
                     opacity: _blinkAnim,
                     child: Container(
-                      color: _actionColor.withOpacity(0.15),
+                      color: _actionColor.withValues(alpha: 0.15),
                       child: Center(
                         child: Container(
                           padding: const EdgeInsets.all(24),
@@ -410,7 +412,7 @@ class _FaceVerifyScreenState extends State<FaceVerifyScreen>
                         padding: const EdgeInsets.symmetric(
                             horizontal: 20, vertical: 8),
                         decoration: BoxDecoration(
-                          color: AppTheme.error.withOpacity(0.85),
+                          color: AppTheme.error.withValues(alpha: 0.85),
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Text(_error!,

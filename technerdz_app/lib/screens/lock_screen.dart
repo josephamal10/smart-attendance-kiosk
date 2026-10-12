@@ -59,12 +59,12 @@ class _LockScreenState extends State<LockScreen>
             child: Container(
               width: double.infinity,
               height: double.infinity,
-              decoration: BoxDecoration(
+              decoration: const BoxDecoration(
                 gradient: RadialGradient(
                   center: Alignment.center,
                   radius: 1.2,
                   colors: [
-                    const Color(0xFF1A1A1A),
+                    Color(0xFF1A1A1A),
                     AppTheme.background,
                   ],
                 ),

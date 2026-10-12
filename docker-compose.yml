@@ -1,0 +1,13 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      # Keep the database and face photos outside the container so rebuilds don't lose them
+      DATABASE_URL: sqlite:////data/technerdz.db
+    volumes:
+      - ./docker-data:/data
+      - ./docker-data/face_images:/app/face_images
+    restart: unless-stopped

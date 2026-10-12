@@ -56,16 +56,16 @@ def load_torch(name: str, weights_dir: str) -> torch.nn.Module:
 
 
 def calibration_crops(image_glob: str, scale: float, limit: int) -> list[np.ndarray]:
-    """Face crops for int8 calibration and parity checks, located with face_recognition."""
-    import face_recognition
-    from services.antispoof_service import box_from_trbl
+    """Face crops for int8 calibration and parity checks, located with YuNet."""
+    from services.antispoof_service import box_from_yunet
+    from services.face_engine import get_engine
 
     crops = []
     for path in sorted(glob.glob(image_glob))[:limit]:
-        rgb = face_recognition.load_image_file(path)
-        locs = face_recognition.face_locations(rgb)
-        if len(locs) == 1:
-            crops.append(crop_face(cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR), box_from_trbl(*locs[0]), scale))
+        img = cv2.imread(path, cv2.IMREAD_COLOR)
+        faces = get_engine().detect(img) if img is not None else []
+        if len(faces) == 1:
+            crops.append(crop_face(img, box_from_yunet(faces[0].box), scale))
     return crops
 
 

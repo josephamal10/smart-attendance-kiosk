@@ -58,6 +58,15 @@ def test_model_input_is_0_to_255_nchw():
     assert x.shape == (1, 3, 80, 80) and x.dtype == np.float32 and x.max() == 200.0
 
 
+def test_portrait_photo_scores_are_valid():
+    """The fixture is a digitised print — just check the full detector → anti-spoof path runs."""
+    import cv2
+    from services.face_engine import get_engine
+    img = cv2.imread("tests/fixtures/astronaut.jpg")
+    _, score = asp.check(img, get_engine().detect(img)[0].box)
+    assert 0.0 <= score <= 1.0
+
+
 def test_onnx_models_output_valid_probabilities():
     model = asp.AntiSpoof()
     img = np.random.default_rng(1).integers(0, 255, (480, 640, 3), dtype=np.uint8)
@@ -67,24 +76,31 @@ def test_onnx_models_output_valid_probabilities():
 
 @pytest.mark.skipif(not glob.glob("face_images/*.jpg"), reason="no local face captures")
 def test_real_webcam_captures_are_judged_real():
-    import face_recognition
-    paths = sorted(glob.glob("face_images/*.jpg"))[:10]
-    for path in paths:
-        rgb = face_recognition.load_image_file(path)
-        locs = face_recognition.face_locations(rgb)
-        if len(locs) == 1:
-            is_real, score = asp.check(rgb, locs[0])
+    import cv2
+    from services.face_engine import get_engine
+    for path in sorted(glob.glob("face_images/*.jpg"))[:10]:
+        img = cv2.imread(path)
+        faces = get_engine().detect(img)
+        if len(faces) == 1:
+            is_real, score = asp.check(img, faces[0].box)
             assert is_real, f"{path} scored {score:.3f}"
 
 
 # ── Wiring into check-in / registration ──────────────────────────────────────
 
+class _FakeEngine:
+    def detect(self, img):
+        from services.face_engine import Face
+        return [Face((1, 2, 30, 40), np.zeros((5, 2)), 0.99, np.zeros(15))]
+
+    def embed(self, img, face):
+        return np.ones(128) / np.sqrt(128)
+
+
 @pytest.fixture
 def one_face(monkeypatch):
-    monkeypatch.setattr(face_service.face_recognition, "load_image_file", lambda f: np.zeros((10, 10, 3)))
-    monkeypatch.setattr(face_service.face_recognition, "face_locations", lambda img: [(1, 2, 3, 4)])
-    monkeypatch.setattr(face_service.face_recognition, "face_encodings",
-                        lambda img, known_face_locations=None: [np.zeros(128)])
+    monkeypatch.setattr(face_service, "get_engine", lambda: _FakeEngine())
+    monkeypatch.setattr(face_service.cv2, "imdecode", lambda *a: np.zeros((10, 10, 3), np.uint8))
 
 
 def test_spoofed_face_is_refused(one_face, monkeypatch):

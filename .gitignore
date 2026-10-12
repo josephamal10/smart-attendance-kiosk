@@ -22,3 +22,5 @@ runs/
 models/antispoof/*.pth
 models/antispoof/*.int8.onnx
 reports/**/scores.csv
+docker-data/
+models/face/*.onnx

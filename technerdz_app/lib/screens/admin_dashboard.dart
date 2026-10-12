@@ -357,7 +357,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   decoration: const InputDecoration(labelText: 'Password')),
                 const SizedBox(height: 16),
                 DropdownButtonFormField<String>(
-                  value: _newRole,
+                  initialValue: _newRole,
                   dropdownColor: AppTheme.card,
                   style: const TextStyle(color: AppTheme.textPrimary),
                   decoration: const InputDecoration(labelText: 'Role'),
@@ -492,9 +492,11 @@ class _AttendanceTable extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (logs.isEmpty) return const Center(
+    if (logs.isEmpty) {
+      return const Center(
       child: Text('No records found.',
         style: TextStyle(color: AppTheme.accentGrey)));
+    }
 
     return Container(
       decoration: BoxDecoration(
@@ -566,9 +568,9 @@ class _AttendanceTable extends StatelessWidget {
 
   Widget _tdHours(DateTime? inTime, DateTime? outTime) {
     if (inTime == null || outTime == null) {
-      return Padding(
-        padding: const EdgeInsets.all(16),
-        child: Text('--:--', style: const TextStyle(
+      return const Padding(
+        padding: EdgeInsets.all(16),
+        child: Text('--:--', style: TextStyle(
           color: AppTheme.accentGrey, fontSize: 14)));
     }
     final diff = outTime.difference(inTime);
@@ -721,9 +723,11 @@ class _EmployeeTableState extends State<_EmployeeTable> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.employees.isEmpty) return const Center(
+    if (widget.employees.isEmpty) {
+      return const Center(
       child: Text('No employees found.',
         style: TextStyle(color: AppTheme.accentGrey)));
+    }
 
     return Container(
       decoration: BoxDecoration(

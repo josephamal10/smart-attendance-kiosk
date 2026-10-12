@@ -85,16 +85,17 @@ def to_input(crops: list[np.ndarray]) -> np.ndarray:
     return np.stack([c.transpose(2, 0, 1) for c in crops]).astype(np.float32)
 
 
-def box_from_trbl(top: int, right: int, bottom: int, left: int) -> tuple[int, int, int, int]:
-    """face_recognition gives (top, right, bottom, left); the models want (x, y, w, h).
+# Where the crop framing tuned in the dlib era (dlib box +10% wide, +25% tall, which gave
+# the best worst-case P(real) on 126 real webcam captures) sits relative to a YuNet box:
+# (dx, dy) offsets and (w, h) scales as fractions of the YuNet box.
+# Measured by ml/antispoof/calibrate_box.py on LFW faces both detectors found.
+YUNET_TO_MODEL_BOX = (-0.141, -0.050, 1.223, 1.039)  # IQR ~0.1 over 1,743 faces
 
-    dlib's HOG box is tight (eyebrows to lip line), while the RetinaFace detector these
-    models were trained with draws a looser box. Growing it 10% wide / 25% tall (mostly
-    upwards, to include the forehead) gave the highest worst-case P(real) on 126 real
-    webcam captures: min 0.86 vs 0.69 for the raw dlib box (ml/antispoof/README.md)."""
-    w, h = right - left, bottom - top
-    grow_w, grow_h = w * 0.10, h * 0.25
-    return (int(left - grow_w / 2), int(top - grow_h * 0.8), int(w + grow_w), int(h + grow_h))
+
+def box_from_yunet(box_xywh) -> tuple[int, int, int, int]:
+    x, y, w, h = box_xywh
+    dx, dy, sw, sh = YUNET_TO_MODEL_BOX
+    return int(x + dx * w), int(y + dy * h), int(w * sw), int(h * sh)
 
 
 def _softmax(z: np.ndarray) -> np.ndarray:
@@ -147,8 +148,7 @@ def is_enabled() -> bool:
     return os.getenv("ANTISPOOF_ENABLED", "true").lower() not in ("0", "false", "no")
 
 
-def check(img_rgb: np.ndarray, face_location_trbl) -> tuple[bool, float]:
-    """(is_real, score) for a face found by face_recognition in an RGB image."""
-    score = get_model().real_score(
-        cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR), box_from_trbl(*face_location_trbl))
+def check(img_bgr: np.ndarray, yunet_box) -> tuple[bool, float]:
+    """(is_real, score) for a face found by the YuNet detector (services/face_engine.py)."""
+    score = get_model().real_score(img_bgr, box_from_yunet(yunet_box))
     return score >= _threshold_from_report(), score

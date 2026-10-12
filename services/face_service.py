@@ -1,5 +1,6 @@
 import io
 import json
+import logging
 import os
 import threading
 import uuid
@@ -14,6 +15,9 @@ from mediapipe.tasks.python.vision.core.vision_task_running_mode import VisionTa
 from sqlalchemy.orm import Session
 
 from models import FaceImage, Employee
+from services import antispoof_service
+
+log = logging.getLogger("technerdz.face")
 
 FACE_IMAGE_DIR = "face_images"
 os.makedirs(FACE_IMAGE_DIR, exist_ok=True)
@@ -96,14 +100,29 @@ def measure_ear(image_bytes: bytes) -> dict:
 
 # ── Face embeddings ───────────────────────────────────────────────────────────
 
-def _single_face_encoding(image_bytes: bytes) -> tuple[np.ndarray | None, str]:
+SPOOF_MESSAGE = "Live face not confirmed. Look at the camera directly — no photos or screens."
+
+
+def _single_face_encoding(image_bytes: bytes, check_spoof: bool = True) -> tuple[np.ndarray | None, str]:
+    """Embedding of the one face in the photo, or (None, reason).
+
+    With check_spoof, the anti-spoofing model must also judge the face as a live person
+    (not a print, phone or monitor) — otherwise anyone could register or check in with
+    someone else's photo."""
     image = face_recognition.load_image_file(io.BytesIO(image_bytes))
-    encodings = face_recognition.face_encodings(image)
-    if len(encodings) == 0:
+    locations = face_recognition.face_locations(image)
+    if len(locations) == 0:
         return None, "No face detected. Please try again."
-    if len(encodings) > 1:
+    if len(locations) > 1:
         return None, "More than one face detected. Only one person should be in frame."
-    return encodings[0], "OK"
+
+    if check_spoof and antispoof_service.is_enabled():
+        is_real, score = antispoof_service.check(image, locations[0])
+        log.info("anti-spoof P(real)=%.3f -> %s", score, "real" if is_real else "SPOOF")
+        if not is_real:
+            return None, SPOOF_MESSAGE
+
+    return face_recognition.face_encodings(image, known_face_locations=locations)[0], "OK"
 
 
 def save_face_image(db: Session, employee_id: int, direction: str,

@@ -1,0 +1,14 @@
+{
+  "name": "pretrained-real-only",
+  "variant": "fp32",
+  "counts": {
+    "real": 126,
+    "print": 0,
+    "replay": 0
+  },
+  "skipped_no_single_face": 2,
+  "sessions": [
+    "registration-captures"
+  ],
+  "bpcer@threshold": 0.0
+}

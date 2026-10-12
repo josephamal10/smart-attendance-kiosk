@@ -1,0 +1,7 @@
+# Only for the anti-spoofing tooling in ml/ (training, export, evaluation) — not needed to run the API.
+# CPU PyTorch: pip install torch==2.14.1 --index-url https://download.pytorch.org/whl/cpu
+-r requirements.txt
+torch==2.14.1
+onnx==1.23.2
+onnxscript==0.7.2
+matplotlib==3.10.9

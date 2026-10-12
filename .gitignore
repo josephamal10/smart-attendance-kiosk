@@ -15,3 +15,10 @@ technerdz_app/build/
 technerdz_app/.dart_tool/
 technerdz_app/.idea/
 technerdz_app/.flutter-plugins-dependencies
+
+# Anti-spoofing: personal captures, training runs, raw weights (re-downloaded by export_onnx.py)
+data/
+runs/
+models/antispoof/*.pth
+models/antispoof/*.int8.onnx
+reports/**/scores.csv

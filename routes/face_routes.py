@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from auth import get_current_user, require_self_or_admin
 from database import get_db
 from models import Employee, FaceImage
+from services import audit
 from services.face_service import save_face_image, get_face_count_by_employee
 
 router = APIRouter(prefix="/face", tags=["Face"])
@@ -71,8 +72,11 @@ def delete_face_images(
 ):
     """Delete all face images for an employee."""
     require_self_or_admin(employee_id, user)
-    for row in db.query(FaceImage).filter(FaceImage.employee_id == employee_id).all():
+    rows = db.query(FaceImage).filter(FaceImage.employee_id == employee_id).all()
+    for row in rows:
         _delete_row(db, row)
+    if rows:
+        audit.record(db, user, "faces.deleted", employee_id=employee_id, details=f"{len(rows)} photos")
     db.commit()
     return {"message": f"Deleted all face images for employee {employee_id}"}
 

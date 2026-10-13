@@ -39,9 +39,12 @@ def _upgrade(bind):
     from models import NO_PASSWORD
 
     columns = {c["name"] for c in inspect(bind).get_columns("employees")}
+    log_columns = {c["name"] for c in inspect(bind).get_columns("attendance_logs")}
     with bind.begin() as conn:
         if "category" not in columns:
             conn.execute(text("ALTER TABLE employees ADD COLUMN category VARCHAR(30)"))
+        if "auto_checkout" not in log_columns:
+            conn.execute(text("ALTER TABLE attendance_logs ADD COLUMN auto_checkout BOOLEAN NOT NULL DEFAULT 0"))
         # Employees check in by face only; make sure no old employee password still works
         conn.execute(text("UPDATE employees SET password = :p WHERE role = 'user' AND password != :p"),
                      {"p": NO_PASSWORD})

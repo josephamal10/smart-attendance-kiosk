@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey, Index
+from sqlalchemy import Column, Integer, String, Date, DateTime, Boolean, Text, ForeignKey, Index
 from sqlalchemy.orm import relationship
 from database import Base
 from datetime import datetime, timezone
@@ -53,5 +53,72 @@ class AttendanceLog(Base):
     in_time = Column(DateTime, nullable=True)        # local office time
     out_time = Column(DateTime, nullable=True)
     status = Column(String(10), default="present")   # present / absent
+    # True when the system closed a day the person forgot to check out of
+    auto_checkout = Column(Boolean, default=False, nullable=False)
 
     employee = relationship("Employee", back_populates="attendance_logs")
+    # Late / early leave / half day are not stored: they're worked out from the current
+    # work rules (services/rules.py), so changing office hours re-evaluates history.
+
+
+class Setting(Base):
+    """Key/value store for things the admin can change in the dashboard (work hours, email...)."""
+    __tablename__ = "settings"
+
+    key = Column(String(50), primary_key=True)
+    value = Column(Text, nullable=False)
+
+
+class Holiday(Base):
+    __tablename__ = "holidays"
+
+    id = Column(Integer, primary_key=True)
+    date = Column(Date, nullable=False, unique=True)
+    name = Column(String(100), nullable=False)
+
+
+class LeaveRequest(Base):
+    __tablename__ = "leave_requests"
+
+    id = Column(Integer, primary_key=True)
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False, index=True)
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=False)
+    kind = Column(String(20), nullable=False)               # sick / casual / other
+    reason = Column(Text, default="")
+    status = Column(String(10), default="pending", nullable=False)  # pending / approved / rejected
+    created_at = Column(DateTime, default=_utcnow)
+    decided_at = Column(DateTime, nullable=True)
+    decided_by = Column(Integer, ForeignKey("employees.id"), nullable=True)
+
+    employee = relationship("Employee", foreign_keys=[employee_id])
+
+
+class CorrectionRequest(Base):
+    """An employee telling the admin their attendance is wrong (e.g. forgot to check out)."""
+    __tablename__ = "correction_requests"
+
+    id = Column(Integer, primary_key=True)
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False, index=True)
+    date = Column(Date, nullable=False)
+    kind = Column(String(30), nullable=False)               # missed_checkout / wrong_time / other
+    note = Column(Text, default="")
+    status = Column(String(10), default="pending", nullable=False)  # pending / resolved / rejected
+    created_at = Column(DateTime, default=_utcnow)
+    resolved_at = Column(DateTime, nullable=True)
+
+    employee = relationship("Employee", foreign_keys=[employee_id])
+
+
+class AuditLog(Base):
+    """Who changed what, when and why. Written for every admin action and system job."""
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True)
+    at = Column(DateTime, default=datetime.now, nullable=False, index=True)  # local time
+    actor_id = Column(Integer, ForeignKey("employees.id"), nullable=True)  # null = system
+    actor_name = Column(String(100), nullable=False)
+    action = Column(String(50), nullable=False)
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=True)
+    details = Column(Text, default="")
+    reason = Column(Text, default="")

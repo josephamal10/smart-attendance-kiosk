@@ -8,7 +8,7 @@ import pytest
 
 from models import AttendanceLog, FaceImage
 from routes import kiosk_routes
-from services import attendance_service, face_service
+from services import face_service, settings_service
 from services.face_engine import Face
 from services.face_service import _ear
 
@@ -149,12 +149,30 @@ def test_quick_second_scan_does_not_check_out(client, make_employee, kiosk):
     assert _check_in(client, _blink(client, kiosk)).json()["action"] == "too_soon"
 
 
-def test_check_out_after_gap(client, make_employee, kiosk, monkeypatch):
+def test_check_out_after_gap(client, make_employee, kiosk, db_session):
     kiosk["register"](make_employee("arun"), seed=1)
     kiosk["probe"] = _unit(1)
     _check_in(client, _blink(client, kiosk))
-    monkeypatch.setattr(attendance_service, "MIN_CHECKOUT_GAP", timedelta(0))
-    assert _check_in(client, _blink(client, kiosk)).json()["action"] == "out"
+    db = db_session()
+    settings_service.put(db, "min_checkout_minutes", 0)
+    db.commit()
+    db.close()
+    res = _check_in(client, _blink(client, kiosk)).json()
+    assert res["action"] == "out" and res["worked_minutes"] is not None
+
+
+def test_check_in_returns_greeting_summary_and_self_token(client, make_employee, kiosk):
+    kiosk["register"](make_employee("priya", category="HR"), seed=1)
+    kiosk["probe"] = _unit(1)
+    res = _check_in(client, _blink(client, kiosk)).json()
+    assert res["greeting"].endswith("Priya!")
+    assert res["self_token"]
+    # The token opens that person's own page...
+    me = client.get("/me", headers={"Authorization": f"Bearer {res['self_token']}"})
+    assert me.status_code == 200 and me.json()["name"] == "Priya"
+    # ...but never the admin dashboard
+    assert client.get("/admin/employees",
+                      headers={"Authorization": f"Bearer {res['self_token']}"}).status_code == 401
 
 
 def test_one_row_per_employee_per_day(db_session, make_employee):

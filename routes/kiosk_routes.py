@@ -10,13 +10,15 @@ to it and single-use, so a check-in always needs a fresh blink in front of the c
 These endpoints are plain `def` (run in a thread pool) because face models are CPU-bound.
 """
 import re
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
+from auth import create_access_token
 from database import get_db
 from schemas import CheckInResponse, LivenessResponse
-from services import liveness_service
+from services import liveness_service, rules as R
 from services.attendance_service import mark_attendance
 from services.face_service import identify_face, measure_ear
 
@@ -59,19 +61,29 @@ def check_in(
         return CheckInResponse(recognized=False, message=msg)
 
     result = mark_attendance(db, employee)
+    action, log = result["action"], result["log"]
+    ev = R.evaluate(log, R.Rules.load(db)) if log else R.Evaluation()
     first = employee.name.split()[0]
     messages = {
-        "in":       f"Welcome, {first}! Have a great day.",
-        "out":      f"See you tomorrow, {first}.",
-        "done":     f"{first}, you've already checked in and out today.",
-        "too_soon": f"{first}, you just checked in. Scan again later to check out.",
+        "in":       "Have a great day!",
+        "out":      "See you tomorrow!",
+        "done":     "You've already checked in and out today.",
+        "too_soon": "You just checked in. Scan again later to check out.",
     }
     return CheckInResponse(
         recognized=True,
         employee_id=employee.id,
         name=employee.name,
         category=employee.category,
-        action=result["action"],
+        action=action,
         time=result["time"],
-        message=messages[result["action"]],
+        message=messages[action],
+        greeting=f"{R.greeting(datetime.now())}, {first}!",
+        flags=ev.flags,
+        late_minutes=ev.late_minutes,
+        early_minutes=ev.early_minutes,
+        worked_minutes=ev.worked_minutes,
+        # Lets this person open "My attendance" for a few minutes, no password needed
+        self_token=create_access_token({"sub": str(employee.id), "type": "self"},
+                                       expires=timedelta(minutes=3)),
     )

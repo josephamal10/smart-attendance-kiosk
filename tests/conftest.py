@@ -7,6 +7,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 os.chdir(ROOT)  # face_service creates face_images/ relative to the cwd
 os.environ.setdefault("SECRET_KEY", "test-secret-key-not-for-production")
+os.environ["DISABLE_SCHEDULER"] = "1"  # background jobs would use the real database
 
 from fastapi.testclient import TestClient          # noqa: E402
 from sqlalchemy import create_engine               # noqa: E402

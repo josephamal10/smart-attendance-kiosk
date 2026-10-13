@@ -1,13 +1,10 @@
-import os
 from datetime import datetime, date, timedelta
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from models import AttendanceLog, Employee
-
-# A second scan sooner than this after check-in is treated as an accidental repeat, not a check-out.
-MIN_CHECKOUT_GAP = timedelta(minutes=int(os.getenv("MIN_CHECKOUT_MINUTES", 5)))
+from services import settings_service
 
 
 def mark_attendance(db: Session, employee: Employee) -> dict:
@@ -30,7 +27,9 @@ def mark_attendance(db: Session, employee: Employee) -> dict:
         return {"action": "in", "time": now, "log": log}
 
     if log.in_time and not log.out_time:
-        if now - log.in_time < MIN_CHECKOUT_GAP:
+        # A second scan this soon after check-in is an accidental repeat, not a check-out
+        gap = timedelta(minutes=int(settings_service.get(db, "min_checkout_minutes")))
+        if now - log.in_time < gap:
             return {"action": "too_soon", "time": log.in_time, "log": log}
         log.out_time = now
         db.commit()

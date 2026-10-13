@@ -5,7 +5,6 @@ import '../services/api_service.dart';
 import '../models/employee.dart';
 import '../widgets/clock_widget.dart';
 import '../widgets/ui.dart';
-import 'lock_screen.dart';
 import 'face_register_screen.dart';
 
 enum _Page { overview, attendance, employees }
@@ -23,6 +22,9 @@ extension on _Page {
       };
 }
 
+/// Employees without a category yet (added before categories existed).
+const _noTeam = 'No team';
+
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({super.key});
   @override
@@ -36,9 +38,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
   List<AttendanceLog> _todayLogs = [];
   List<AttendanceLog> _allLogs = [];
   List<Employee> _employees = [];
+  List<String> _categories = [];
   final Map<int, int> _faceCounts = {};
   final Map<int, Map<String, dynamic>> _monthStats = {};
   DateTimeRange? _range;
+  String? _team; // team filter on the Attendance page (null = everyone)
 
   static final _day = DateFormat('yyyy-MM-dd');
 
@@ -59,11 +63,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
         ),
         ApiService.getAllEmployees(),
         ApiService.getAttendancePercentage(),
+        if (_categories.isEmpty) ApiService.getCategories(),
       ]);
       final emps = results[2] as List<Employee>;
       final counts = await Future.wait(emps.map((e) => ApiService.getFaceCount(e.id)));
       if (!mounted) return;
       setState(() {
+        if (results.length > 4) _categories = results[4] as List<String>;
         _todayLogs = (results[0] as List<AttendanceLog>)
           ..sort((a, b) => (b.inTime ?? DateTime(0)).compareTo(a.inTime ?? DateTime(0)));
         _allLogs = (results[1] as List<AttendanceLog>)
@@ -102,18 +108,37 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
   }
 
+  /// Back to the sign-in screen, which then returns to the kiosk.
   void _logout() {
     ApiService.clearSession();
-    Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const LockScreen()), (_) => false);
+    Navigator.of(context).pop();
   }
 
   Future<void> _addEmployee() async {
-    final created = await showDialog<String>(context: context, builder: (_) => const _AddEmployeeDialog());
-    if (created != null && mounted) {
-      _toast('$created was added. Register their face next.');
+    final created = await showDialog<Employee>(
+        context: context, builder: (_) => _EmployeeDialog(categories: _categories));
+    if (created == null || !mounted) return;
+    await _loadData();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('${created.name} was added to ${created.category}. Register their face next.'),
+      action: SnackBarAction(label: 'Register face', onPressed: () => _registerFace(created)),
+      duration: const Duration(seconds: 8),
+    ));
+  }
+
+  Future<void> _editEmployee(Employee emp) async {
+    final saved = await showDialog<Employee>(
+        context: context, builder: (_) => _EmployeeDialog(categories: _categories, employee: emp));
+    if (saved != null && mounted) {
+      _toast('Saved changes for ${saved.name}.');
       _loadData();
     }
+  }
+
+  Future<void> _changePassword() async {
+    final ok = await showDialog<bool>(context: context, builder: (_) => const _ChangePasswordDialog());
+    if (ok == true && mounted) _toast('Password changed. Use it next time you sign in.');
   }
 
   Future<void> _registerFace(Employee emp, {bool replace = false}) async {
@@ -190,8 +215,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
   }
 
-  String _empName(int id) =>
-      _employees.where((e) => e.id == id).map((e) => e.name).firstOrNull ?? 'Former employee';
+  Employee? _emp(int id) => _employees.where((e) => e.id == id).firstOrNull;
+  String _teamOf(int employeeId) => _emp(employeeId)?.category ?? _noTeam;
+
+  /// Teams to show: the official categories, plus "No team" if anyone still lacks one.
+  List<String> get _teams => [
+        ..._categories,
+        if (_employees.any((e) => e.category == null)) _noTeam,
+      ];
 
   // ── Layout ───────────────────────────────────────────────
 
@@ -266,7 +297,19 @@ class _AdminDashboardState extends State<AdminDashboard> {
               const Text('Administrator', style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
             ]),
           ),
-          IconButton(tooltip: 'Sign out', onPressed: _logout, icon: const Icon(Icons.logout, size: 20)),
+          PopupMenuButton<String>(
+            tooltip: 'Account',
+            icon: const Icon(Icons.more_vert, size: 20),
+            onSelected: (v) => v == 'password' ? _changePassword() : _logout(),
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'password', child: ListTile(
+                  dense: true, contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.key_outlined, size: 20), title: Text('Change password'))),
+              PopupMenuItem(value: 'logout', child: ListTile(
+                  dense: true, contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.logout, size: 20), title: Text('Sign out'))),
+            ],
+          ),
         ]),
       ]),
     );
@@ -301,7 +344,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         ),
         const SizedBox(width: 12),
         ElevatedButton.icon(
-          onPressed: _addEmployee,
+          onPressed: _categories.isEmpty ? null : _addEmployee,
           icon: const Icon(Icons.person_add_alt_1_outlined, size: 18),
           label: const Text('Add employee'),
         ),
@@ -309,14 +352,49 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
+  Widget _cardHeader(String title, String subtitle, {Widget? trailing}) => Row(children: [
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title, style: AppTheme.h3),
+            const SizedBox(height: 2),
+            Text(subtitle, style: AppTheme.muted),
+          ]),
+        ),
+        if (trailing != null) trailing,
+      ]);
+
+  /// "All · HR · Developer ..." filter chips.
+  Widget _teamChips(String? selected, ValueChanged<String?> onSelect) => Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (final t in [null, ..._teams])
+            ChoiceChip(
+              label: Text(t ?? 'All teams'),
+              selected: selected == t,
+              showCheckmark: false,
+              onSelected: (_) => onSelect(t),
+              labelStyle: TextStyle(
+                fontSize: 13, fontWeight: FontWeight.w500,
+                color: selected == t ? AppTheme.primary : AppTheme.textSecondary,
+              ),
+              backgroundColor: AppTheme.surface,
+              selectedColor: AppTheme.primarySoft,
+              side: BorderSide(color: selected == t ? AppTheme.primary.withValues(alpha: 0.4) : AppTheme.border),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+            ),
+        ],
+      );
+
   // ── Overview ─────────────────────────────────────────────
 
   Widget _overview() {
-    final total = _employees.where((e) => e.isActive).length;
+    final active = _employees.where((e) => e.isActive).toList();
+    final total = active.length;
     final present = _todayLogs.length;
     final out = _todayLogs.where((l) => l.outTime != null).length;
     final notIn = (total - present).clamp(0, total);
-    final noFace = _employees.where((e) => (_faceCounts[e.id] ?? 0) == 0).length;
+    final noFace = active.where((e) => (_faceCounts[e.id] ?? 0) == 0).length;
     final pct = total == 0 ? 0 : (present * 100 / total).round();
 
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -336,26 +414,53 @@ class _AdminDashboardState extends State<AdminDashboard> {
             caption: 'As of ${DateFormat('h:mm a').format(DateTime.now())}')),
       ])),
       const SizedBox(height: 24),
-      _logTable(
-        _todayLogs,
-        header: _cardHeader("Today's activity", '${_todayLogs.length} check-ins'),
-        showDate: false,
-        empty: const EmptyState(icon: Icons.wb_sunny_outlined, title: 'No check-ins yet today',
-            message: 'People appear here as soon as they scan in at the kiosk.'),
-      ),
+      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Expanded(
+          flex: 2,
+          child: _logTable(
+            _todayLogs,
+            header: _cardHeader("Today's activity", '${_todayLogs.length} check-ins'),
+            showDate: false,
+            empty: const EmptyState(icon: Icons.wb_sunny_outlined, title: 'No check-ins yet today',
+                message: 'People appear here as soon as they scan in at the kiosk.'),
+          ),
+        ),
+        const SizedBox(width: AppTheme.gap),
+        Expanded(child: _byTeamCard(active)),
+      ]),
     ]);
   }
 
-  Widget _cardHeader(String title, String subtitle, {Widget? trailing}) => Row(children: [
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(title, style: AppTheme.h3),
-            const SizedBox(height: 2),
-            Text(subtitle, style: AppTheme.muted),
-          ]),
-        ),
-        if (trailing != null) trailing,
-      ]);
+  Widget _byTeamCard(List<Employee> active) {
+    final presentIds = _todayLogs.map((l) => l.employeeId).toSet();
+    return AppCard(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        _cardHeader('By team', 'Present today'),
+        const SizedBox(height: 18),
+        for (final team in _teams) ...[
+          Builder(builder: (_) {
+            final members = active.where((e) => (e.category ?? _noTeam) == team).toList();
+            final here = members.where((e) => presentIds.contains(e.id)).length;
+            final frac = members.isEmpty ? 0.0 : here / members.length;
+            return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Row(children: [
+                Expanded(child: Text(team, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500))),
+                Text(members.isEmpty ? '—' : '$here / ${members.length}',
+                    style: AppTheme.muted.copyWith(fontFeatures: AppTheme.tabular)),
+              ]),
+              const SizedBox(height: 6),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(value: frac, minHeight: 6,
+                    color: AppTheme.primary, backgroundColor: AppTheme.border),
+              ),
+            ]);
+          }),
+          const SizedBox(height: 16),
+        ],
+      ]),
+    );
+  }
 
   Widget _logTable(List<AttendanceLog> logs,
       {required Widget header, required bool showDate, required Widget empty}) {
@@ -368,17 +473,17 @@ class _AdminDashboardState extends State<AdminDashboard> {
         if (showDate) const Col('Date', flex: 2),
         const Col('Check in', flex: 2),
         const Col('Check out', flex: 2),
-        const Col('Hours', flex: 2),
+        if (showDate) const Col('Hours', flex: 2),
         const Col('Status', flex: 2),
       ],
       rows: [
         for (final l in logs)
           [
-            PersonCell(_empName(l.employeeId)),
+            PersonCell(_emp(l.employeeId)?.name ?? 'Former employee', secondary: _teamOf(l.employeeId)),
             if (showDate) Text(DateFormat('EEE, d MMM y').format(DateTime.parse(l.date)), style: AppTheme.body),
             Text(l.inTime == null ? '—' : time.format(l.inTime!), style: AppTheme.body),
             Text(l.outTime == null ? '—' : time.format(l.outTime!), style: AppTheme.body),
-            Text(_hours(l), style: AppTheme.body.copyWith(fontFeatures: AppTheme.tabular)),
+            if (showDate) Text(_hours(l), style: AppTheme.body.copyWith(fontFeatures: AppTheme.tabular)),
             l.outTime != null
                 ? const StatusBadge('Completed', tone: Tone.success)
                 : l.inTime != null
@@ -404,25 +509,30 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final rangeText = _range == null
         ? 'All dates'
         : '${fmt.format(_range!.start)} – ${fmt.format(_range!.end)}';
+    final logs = _team == null ? _allLogs : _allLogs.where((l) => _teamOf(l.employeeId) == _team).toList();
     return _logTable(
-      _allLogs,
+      logs,
       showDate: true,
-      header: _cardHeader('History', '${_allLogs.length} records · $rangeText',
-          trailing: Row(children: [
-            if (_range != null)
-              TextButton(
-                onPressed: () { setState(() => _range = null); _loadData(); },
-                child: const Text('Clear'),
+      header: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        _cardHeader('History', '${logs.length} records · $rangeText',
+            trailing: Row(children: [
+              if (_range != null)
+                TextButton(
+                  onPressed: () { setState(() => _range = null); _loadData(); },
+                  child: const Text('Clear dates'),
+                ),
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                onPressed: _pickRange,
+                icon: const Icon(Icons.date_range_outlined, size: 18),
+                label: Text(rangeText),
               ),
-            const SizedBox(width: 8),
-            OutlinedButton.icon(
-              onPressed: _pickRange,
-              icon: const Icon(Icons.date_range_outlined, size: 18),
-              label: Text(rangeText),
-            ),
-          ])),
+            ])),
+        const SizedBox(height: 14),
+        _teamChips(_team, (t) => setState(() => _team = t)),
+      ]),
       empty: const EmptyState(icon: Icons.event_busy_outlined, title: 'No records',
-          message: 'Try a different date range.'),
+          message: 'Try a different date range or team.'),
     );
   }
 
@@ -433,9 +543,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
         faceCounts: _faceCounts,
         monthStats: _monthStats,
         header: _cardHeader,
+        teamChips: _teamChips,
         onRegister: (e) => _registerFace(e),
         onReplace: (e) => _registerFace(e, replace: true),
         onDelete: _deleteFaces,
+        onEdit: _editEmployee,
       );
 }
 
@@ -480,10 +592,12 @@ class _EmployeesTable extends StatefulWidget {
   final Map<int, int> faceCounts;
   final Map<int, Map<String, dynamic>> monthStats;
   final Widget Function(String, String, {Widget? trailing}) header;
-  final void Function(Employee) onRegister, onReplace, onDelete;
+  final Widget Function(String?, ValueChanged<String?>) teamChips;
+  final void Function(Employee) onRegister, onReplace, onDelete, onEdit;
   const _EmployeesTable({
     required this.employees, required this.faceCounts, required this.monthStats,
-    required this.header, required this.onRegister, required this.onReplace, required this.onDelete,
+    required this.header, required this.teamChips, required this.onRegister,
+    required this.onReplace, required this.onDelete, required this.onEdit,
   });
 
   @override
@@ -492,40 +606,46 @@ class _EmployeesTable extends StatefulWidget {
 
 class _EmployeesTableState extends State<_EmployeesTable> {
   String _query = '';
+  String? _team;
 
   @override
   Widget build(BuildContext context) {
     final q = _query.toLowerCase();
     final list = widget.employees
-        .where((e) => e.name.toLowerCase().contains(q) || e.username.toLowerCase().contains(q))
+        .where((e) => _team == null || (e.category ?? _noTeam) == _team)
+        .where((e) => e.name.toLowerCase().contains(q))
         .toList()
       ..sort((a, b) => a.name.compareTo(b.name));
 
     return DataCard(
-      header: widget.header(
-        'Team', '${widget.employees.length} people',
-        trailing: SizedBox(
-          width: 280,
-          child: TextField(
-            onChanged: (v) => setState(() => _query = v),
-            decoration: const InputDecoration(
-              hintText: 'Search by name or username',
-              prefixIcon: Icon(Icons.search, size: 20),
-              contentPadding: EdgeInsets.symmetric(vertical: 10),
+      header: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        widget.header(
+          'Team', '${widget.employees.length} people',
+          trailing: SizedBox(
+            width: 280,
+            child: TextField(
+              onChanged: (v) => setState(() => _query = v),
+              decoration: const InputDecoration(
+                hintText: 'Search by name',
+                prefixIcon: Icon(Icons.search, size: 20),
+                contentPadding: EdgeInsets.symmetric(vertical: 10),
+              ),
             ),
           ),
         ),
-      ),
+        const SizedBox(height: 14),
+        widget.teamChips(_team, (t) => setState(() => _team = t)),
+      ]),
       empty: EmptyState(
         icon: Icons.person_search_outlined,
         title: widget.employees.isEmpty ? 'No employees yet' : 'No matches',
         message: widget.employees.isEmpty
-            ? 'Use "Add employee" to create the first account.'
-            : 'Nobody matches "$_query".',
+            ? 'Use "Add employee" to add the first person.'
+            : 'Nobody matches this search or team.',
       ),
       columns: const [
         Col('Employee', flex: 4),
-        Col('Account', flex: 2),
+        Col('Team', flex: 2),
         Col('This month', flex: 3),
         Col('Face', flex: 3),
         Col('', flex: 3, alignEnd: true),
@@ -541,8 +661,10 @@ class _EmployeesTableState extends State<_EmployeesTable> {
     final tone = pct == null ? Tone.neutral : pct >= 75 ? Tone.success : pct >= 50 ? Tone.warning : Tone.danger;
 
     return [
-      PersonCell(e.name, secondary: '@${e.username}'),
-      StatusBadge(e.isActive ? 'Active' : 'Disabled', tone: e.isActive ? Tone.success : Tone.neutral),
+      PersonCell(e.name, secondary: e.isActive ? null : 'Disabled — cannot check in'),
+      e.category == null
+          ? const StatusBadge('Not set', tone: Tone.warning)
+          : StatusBadge(e.category!, tone: Tone.neutral, dot: false),
       pct == null
           ? const Text('—', style: TextStyle(color: AppTheme.textMuted))
           : SizedBox(
@@ -568,64 +690,81 @@ class _EmployeesTableState extends State<_EmployeesTable> {
       faces > 0
           ? StatusBadge('Registered · $faces photos', tone: Tone.success)
           : const StatusBadge('Not registered', tone: Tone.warning),
-      faces == 0
-          ? ElevatedButton.icon(
-              onPressed: () => widget.onRegister(e),
-              icon: const Icon(Icons.center_focus_strong_outlined, size: 18),
-              label: const Text('Register face'),
-            )
-          : Row(mainAxisSize: MainAxisSize.min, children: [
-              OutlinedButton(onPressed: () => widget.onReplace(e), child: const Text('Re-register')),
-              PopupMenuButton<String>(
-                tooltip: 'More',
-                icon: const Icon(Icons.more_vert, color: AppTheme.textSecondary),
-                onSelected: (v) => v == 'add' ? widget.onRegister(e) : widget.onDelete(e),
-                itemBuilder: (_) => const [
-                  PopupMenuItem(value: 'add', child: ListTile(
-                      dense: true, contentPadding: EdgeInsets.zero,
-                      leading: Icon(Icons.add_a_photo_outlined, size: 20), title: Text('Add more photos'))),
-                  PopupMenuItem(value: 'delete', child: ListTile(
-                      dense: true, contentPadding: EdgeInsets.zero,
-                      leading: Icon(Icons.delete_outline, size: 20, color: AppTheme.danger),
-                      title: Text('Delete face data', style: TextStyle(color: AppTheme.danger)))),
-                ],
-              ),
-            ]),
+      Row(mainAxisSize: MainAxisSize.min, children: [
+        faces == 0
+            ? ElevatedButton.icon(
+                onPressed: () => widget.onRegister(e),
+                icon: const Icon(Icons.center_focus_strong_outlined, size: 18),
+                label: const Text('Register face'),
+              )
+            : OutlinedButton(onPressed: () => widget.onReplace(e), child: const Text('Re-register')),
+        PopupMenuButton<String>(
+          tooltip: 'More',
+          icon: const Icon(Icons.more_vert, color: AppTheme.textSecondary),
+          onSelected: (v) => switch (v) {
+            'edit' => widget.onEdit(e),
+            'add' => widget.onRegister(e),
+            _ => widget.onDelete(e),
+          },
+          itemBuilder: (_) => [
+            const PopupMenuItem(value: 'edit', child: ListTile(
+                dense: true, contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.edit_outlined, size: 20), title: Text('Edit details'))),
+            if (faces > 0) ...const [
+              PopupMenuItem(value: 'add', child: ListTile(
+                  dense: true, contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.add_a_photo_outlined, size: 20), title: Text('Add more photos'))),
+              PopupMenuItem(value: 'delete', child: ListTile(
+                  dense: true, contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.delete_outline, size: 20, color: AppTheme.danger),
+                  title: Text('Delete face data', style: TextStyle(color: AppTheme.danger)))),
+            ],
+          ],
+        ),
+      ]),
     ];
   }
 }
 
-// ── Add employee dialog ──────────────────────────────────────
+// ── Add / edit employee dialog ───────────────────────────────
 
-class _AddEmployeeDialog extends StatefulWidget {
-  const _AddEmployeeDialog();
+class _EmployeeDialog extends StatefulWidget {
+  final List<String> categories;
+  final Employee? employee; // null = add a new one
+  const _EmployeeDialog({required this.categories, this.employee});
   @override
-  State<_AddEmployeeDialog> createState() => _AddEmployeeDialogState();
+  State<_EmployeeDialog> createState() => _EmployeeDialogState();
 }
 
-class _AddEmployeeDialogState extends State<_AddEmployeeDialog> {
-  final _name = TextEditingController();
-  final _user = TextEditingController();
-  final _pass = TextEditingController();
-  String _role = 'user';
+class _EmployeeDialogState extends State<_EmployeeDialog> {
+  late final _name = TextEditingController(text: widget.employee?.name);
+  late String? _category = widget.employee?.category;
+  late bool _active = widget.employee?.isActive ?? true;
   bool _saving = false;
   String? _error;
 
+  bool get _editing => widget.employee != null;
+
   @override
   void dispose() {
-    _name.dispose(); _user.dispose(); _pass.dispose();
+    _name.dispose();
     super.dispose();
   }
 
   Future<void> _save() async {
+    final name = _name.text.trim();
+    if (name.isEmpty || _category == null) {
+      setState(() => _error = 'Enter a name and choose a team.');
+      return;
+    }
     setState(() { _saving = true; _error = null; });
     try {
-      await ApiService.registerEmployee(_name.text.trim(), _user.text.trim(), _pass.text, _role);
-      if (mounted) Navigator.pop(context, _name.text.trim());
+      final saved = _editing
+          ? await ApiService.updateEmployee(widget.employee!.id, name: name, category: _category, isActive: _active)
+          : await ApiService.createEmployee(name, _category!);
+      if (mounted) Navigator.pop(context, saved);
     } on ApiException catch (e) {
-      setState(() => _error = e.statusCode == 422
-          ? 'Please fill every field. Usernames need 2+ characters and passwords 6+.'
-          : e.message);
+      setState(() => _error = e.message);
     } catch (_) {
       setState(() => _error = 'Could not reach the server.');
     } finally {
@@ -633,46 +772,72 @@ class _AddEmployeeDialogState extends State<_AddEmployeeDialog> {
     }
   }
 
-  Widget _field(String label, TextEditingController c, {bool secret = false, String? hint, IconData? icon}) =>
-      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(label, style: AppTheme.label),
-        const SizedBox(height: 6),
-        TextField(
-          controller: c, obscureText: secret,
-          decoration: InputDecoration(hintText: hint, prefixIcon: icon == null ? null : Icon(icon, size: 20)),
-        ),
-      ]);
+  static const _icons = {
+    'HR': Icons.diversity_3_outlined,
+    'Project Manager': Icons.assignment_ind_outlined,
+    'Admin': Icons.business_center_outlined,
+    'Developer': Icons.code,
+    'Tester': Icons.bug_report_outlined,
+  };
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
       titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
       title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('Add employee'),
+        Text(_editing ? 'Edit employee' : 'Add employee'),
         const SizedBox(height: 4),
-        Text('They can sign in at the kiosk once their face is registered.', style: AppTheme.muted),
+        Text(_editing
+            ? 'Change their name, team or whether they can check in.'
+            : 'No password needed — they check in with their face once it is registered.',
+            style: AppTheme.muted),
       ]),
       content: SizedBox(
-        width: 420,
+        width: 460,
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           const SizedBox(height: 8),
-          _field('Full name', _name, hint: 'e.g. Priya Raman', icon: Icons.badge_outlined),
-          const SizedBox(height: 16),
-          _field('Username', _user, hint: 'e.g. priya', icon: Icons.alternate_email),
-          const SizedBox(height: 16),
-          _field('Password', _pass, secret: true, hint: 'At least 6 characters', icon: Icons.lock_outline),
-          const SizedBox(height: 16),
-          Text('Role', style: AppTheme.label),
+          Text('Full name', style: AppTheme.label),
           const SizedBox(height: 6),
-          SegmentedButton<String>(
-            segments: const [
-              ButtonSegment(value: 'user', label: Text('Employee'), icon: Icon(Icons.person_outline)),
-              ButtonSegment(value: 'admin', label: Text('Admin'), icon: Icon(Icons.admin_panel_settings_outlined)),
-            ],
-            selected: {_role},
-            showSelectedIcon: false,
-            onSelectionChanged: (s) => setState(() => _role = s.first),
+          TextField(
+            controller: _name,
+            autofocus: !_editing,
+            decoration: const InputDecoration(
+                hintText: 'e.g. Priya Raman', prefixIcon: Icon(Icons.badge_outlined, size: 20)),
           ),
+          const SizedBox(height: 20),
+          Text('Team', style: AppTheme.label),
+          const SizedBox(height: 8),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            for (final c in widget.categories)
+              ChoiceChip(
+                avatar: Icon(_icons[c] ?? Icons.work_outline, size: 18,
+                    color: _category == c ? AppTheme.primary : AppTheme.textSecondary),
+                label: Text(c),
+                selected: _category == c,
+                showCheckmark: false,
+                onSelected: (_) => setState(() => _category = c),
+                labelStyle: TextStyle(fontSize: 13, fontWeight: FontWeight.w500,
+                    color: _category == c ? AppTheme.primary : AppTheme.textPrimary),
+                backgroundColor: AppTheme.surface,
+                selectedColor: AppTheme.primarySoft,
+                side: BorderSide(color: _category == c ? AppTheme.primary : AppTheme.borderStrong),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+              ),
+          ]),
+          if (_editing) ...[
+            const SizedBox(height: 20),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: _active,
+              onChanged: (v) => setState(() => _active = v),
+              title: const Text('Can check in', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+              subtitle: Text(_active
+                  ? 'Recognised at the kiosk'
+                  : 'Disabled — the kiosk will not recognise them (history is kept)',
+                  style: AppTheme.muted),
+            ),
+          ],
           if (_error != null) ...[const SizedBox(height: 16), InfoBanner(_error!)],
         ]),
       ),
@@ -684,8 +849,83 @@ class _AddEmployeeDialogState extends State<_AddEmployeeDialog> {
           child: _saving
               ? const SizedBox(width: 18, height: 18,
                   child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-              : const Text('Add employee'),
+              : Text(_editing ? 'Save changes' : 'Add employee'),
         ),
+      ],
+    );
+  }
+}
+
+// ── Change password dialog ───────────────────────────────────
+
+class _ChangePasswordDialog extends StatefulWidget {
+  const _ChangePasswordDialog();
+  @override
+  State<_ChangePasswordDialog> createState() => _ChangePasswordDialogState();
+}
+
+class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
+  final _current = TextEditingController();
+  final _next = TextEditingController();
+  final _repeat = TextEditingController();
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _current.dispose(); _next.dispose(); _repeat.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (_next.text.isEmpty) {
+      setState(() => _error = 'Enter a new password.');
+      return;
+    }
+    if (_next.text != _repeat.text) {
+      setState(() => _error = "The new passwords don't match.");
+      return;
+    }
+    setState(() { _saving = true; _error = null; });
+    try {
+      await ApiService.changePassword(_current.text, _next.text);
+      if (mounted) Navigator.pop(context, true);
+    } on ApiException catch (e) {
+      setState(() => _error = e.message);
+    } catch (_) {
+      setState(() => _error = 'Could not reach the server.');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Widget _field(String label, TextEditingController c, {bool autofocus = false}) =>
+      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(label, style: AppTheme.label),
+        const SizedBox(height: 6),
+        TextField(controller: c, obscureText: true, autofocus: autofocus,
+            decoration: const InputDecoration(prefixIcon: Icon(Icons.lock_outline, size: 20))),
+      ]);
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Change password'),
+      content: SizedBox(
+        width: 380,
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          _field('Current password', _current, autofocus: true),
+          const SizedBox(height: 16),
+          _field('New password', _next),
+          const SizedBox(height: 16),
+          _field('Repeat new password', _repeat),
+          if (_error != null) ...[const SizedBox(height: 16), InfoBanner(_error!)],
+        ]),
+      ),
+      actionsPadding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
+      actions: [
+        OutlinedButton(onPressed: _saving ? null : () => Navigator.pop(context), child: const Text('Cancel')),
+        ElevatedButton(onPressed: _saving ? null : _save, child: const Text('Change password')),
       ],
     );
   }

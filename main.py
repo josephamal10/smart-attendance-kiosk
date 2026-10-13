@@ -4,7 +4,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import init_db
-from routes import auth_routes, face_routes, attendance_routes, admin_routes
+from routes import auth_routes, face_routes, kiosk_routes, admin_routes
 from services import antispoof_service
 from services.face_engine import get_engine
 
@@ -37,7 +37,7 @@ if _origins:
 # Register routers
 app.include_router(auth_routes.router)
 app.include_router(face_routes.router)
-app.include_router(attendance_routes.router)
+app.include_router(kiosk_routes.router)
 app.include_router(admin_routes.router)
 
 @app.get("/")

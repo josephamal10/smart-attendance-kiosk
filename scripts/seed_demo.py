@@ -7,6 +7,7 @@ for screenshots and UI work. Never touches the real technerdz.db.
     python -m uvicorn main:app --port 8001
 
 Demo admin: username "demo-admin", password from --password (default below).
+Employees have no passwords (they check in by face), like the real system.
 """
 import argparse
 import json
@@ -19,9 +20,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 PEOPLE = [
-    "Aarav Menon", "Priya Raman", "Karthik Subramanian", "Divya Nair", "Rahul Verma",
-    "Sneha Iyer", "Vikram Joshi", "Ananya Krishnan", "Arjun Pillai", "Meera Das",
-    "Rohan Kapoor", "Lakshmi Prasad",
+    ("Aarav Menon", "Developer"), ("Priya Raman", "HR"), ("Karthik Subramanian", "Developer"),
+    ("Divya Nair", "Tester"), ("Rahul Verma", "Project Manager"), ("Sneha Iyer", "Developer"),
+    ("Vikram Joshi", "Tester"), ("Ananya Krishnan", "HR"), ("Arjun Pillai", "Admin"),
+    ("Meera Das", "Developer"), ("Rohan Kapoor", "Project Manager"), ("Lakshmi Prasad", "Admin"),
 ]
 
 
@@ -40,7 +42,7 @@ def main():
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from database import init_db
-    from models import AttendanceLog, Employee, FaceImage
+    from models import AttendanceLog, Employee, FaceImage, NO_PASSWORD
     from auth import hash_password
 
     engine = create_engine(os.environ["DATABASE_URL"])
@@ -51,9 +53,9 @@ def main():
     db.add(Employee(name="Demo Admin", username="demo-admin",
                     password=hash_password(args.password), role="admin"))
     emps = []
-    for name in PEOPLE:
-        e = Employee(name=name, username=name.split()[0].lower(),
-                     password=hash_password(args.password), role="user")
+    for name, category in PEOPLE:
+        e = Employee(name=name, username=f"emp-{name.split()[0].lower()}", category=category,
+                     password=NO_PASSWORD, role="user")
         db.add(e)
         emps.append(e)
     db.commit()

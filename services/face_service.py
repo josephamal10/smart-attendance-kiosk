@@ -27,6 +27,8 @@ os.makedirs(FACE_IMAGE_DIR, exist_ok=True)
 # takes the best of ~30 registered images, so genuine scores run much higher. Erring strict
 # also offsets the extra impostor chances that best-of-30 gives. See ml/README.md.
 MATCH_THRESHOLD = float(os.getenv("FACE_MATCH_THRESHOLD", 0.45))
+# For walk-up identification the winner must also beat the next most similar person by this much
+IDENTIFY_MARGIN = float(os.getenv("FACE_IDENTIFY_MARGIN", 0.08))
 
 # Eye landmark indices (MediaPipe 478 landmarks)
 LEFT_EYE  = [362, 385, 387, 263, 373, 380]
@@ -164,20 +166,38 @@ def get_face_count_by_employee(db: Session, employee_id: int) -> int:
     return db.query(FaceImage).filter(FaceImage.employee_id == employee_id).count()
 
 
-def verify_face(db: Session, image_bytes: bytes, employee_id: int,
-                threshold: float = MATCH_THRESHOLD) -> tuple[Employee | None, str]:
-    """1:1 check — does this photo match the stored faces of `employee_id`?"""
-    rows = db.query(FaceImage).filter(FaceImage.employee_id == employee_id).all()
+def identify_face(db: Session, image_bytes: bytes,
+                  threshold: float = MATCH_THRESHOLD) -> tuple[Employee | None, str]:
+    """1:N — who, among all active employees with registered faces, is in this photo?
+
+    Each person's score is their best match over their ~30 photos. We accept the top
+    person only if they clear `threshold` AND beat the runner-up by IDENTIFY_MARGIN,
+    so two similar-looking colleagues are never confused for each other."""
+    rows = (db.query(FaceImage.employee_id, FaceImage.embedding)
+              .join(Employee, Employee.id == FaceImage.employee_id)
+              .filter(Employee.is_active == True)  # noqa: E712
+              .all())
     if not rows:
-        return None, "No faces registered yet. Ask admin to register your face first."
+        return None, "No faces are registered yet. Ask the admin to register you."
 
     probe, msg = _single_face_encoding(image_bytes)
     if probe is None:
         return None, msg
 
     known = np.array([json.loads(r.embedding) for r in rows])
-    best = float(np.max(cosine_similarity(known, probe)))
-    log.info("face match: best cosine %.3f (threshold %.2f)", best, threshold)
-    if best >= threshold:
-        return db.get(Employee, employee_id), "OK"
-    return None, "Face not recognized. Please try again."
+    sims = cosine_similarity(known, probe)
+    best_per_person: dict[int, float] = {}
+    for (emp_id, _), sim in zip(rows, sims):
+        best_per_person[emp_id] = max(best_per_person.get(emp_id, -1.0), float(sim))
+
+    ranked = sorted(best_per_person.items(), key=lambda kv: kv[1], reverse=True)
+    top_id, top = ranked[0]
+    runner_up = ranked[1][1] if len(ranked) > 1 else -1.0
+    log.info("identify: best %.3f (employee %d), runner-up %.3f, threshold %.2f",
+             top, top_id, runner_up, threshold)
+
+    if top < threshold:
+        return None, "Face not recognised. Please try again, or ask the admin to register you."
+    if top - runner_up < IDENTIFY_MARGIN:
+        return None, "Couldn't tell who you are for sure. Please look straight at the camera and try again."
+    return db.get(Employee, top_id), "OK"

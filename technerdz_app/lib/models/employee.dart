@@ -1,14 +1,14 @@
 class Employee {
   final int id;
   final String name;
-  final String username;
+  final String? category; // HR, Project Manager, Admin, Developer, Tester (null = not set yet)
   final String role;
   final bool isActive;
 
   Employee({
     required this.id,
     required this.name,
-    required this.username,
+    this.category,
     required this.role,
     required this.isActive,
   });
@@ -16,8 +16,7 @@ class Employee {
   factory Employee.fromJson(Map<String, dynamic> j) => Employee(
     id:       j['id'],
     name:     j['name'],
-    username: j['username'],
-    // The public login list only sends id/name/username
+    category: j['category'],
     role:     j['role'] ?? 'user',
     isActive: j['is_active'] ?? true,
   );

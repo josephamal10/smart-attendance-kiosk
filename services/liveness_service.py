@@ -1,14 +1,13 @@
 """
 Server-side blink check.
 
-Before, the Flutter app decided by itself whether the user blinked, and the
-attendance endpoint trusted it — so anyone could skip the check by POSTing a photo.
-Now the app streams frames here; the server watches for an open → closed eye
-transition and only then hands out a short-lived, single-use liveness token that
-/attendance/verify requires.
+The kiosk app streams camera frames here under a random per-scan session id. The
+server watches for an open → closed eye transition and only then hands out a
+short-lived, single-use liveness token, bound to that session, which the kiosk
+check-in endpoint requires. The app can't skip the check by just POSTing a photo.
 
-This stops photo-of-a-photo attacks but not a replayed video; a trained
-anti-spoofing model is the next step.
+A blink defeats a still photo; replayed videos are the anti-spoofing model's job
+(services/antispoof_service.py), which runs on the check-in photo.
 """
 import threading
 import time
@@ -22,40 +21,41 @@ OPEN_EAR_MIN           = 0.20   # pixel-space EAR above this = eyes clearly open
 CLOSED_RATIO           = 0.60   # closed = EAR below 60% of this person's open baseline
 
 _lock = threading.Lock()
-_sessions: dict[int, dict] = {}       # employee_id -> {"baseline": float, "seen": float}
+_sessions: dict[str, dict] = {}       # scan session id -> {"baseline": float, "seen": float}
 _used_tokens: dict[str, float] = {}   # jti -> expiry (unix time), so tokens are single-use
 
 
-def observe(employee_id: int, ear: float) -> bool:
+def observe(session_id: str, ear: float) -> bool:
     """Feed one EAR reading. Returns True once a blink has been seen."""
     now = time.time()
     with _lock:
-        s = _sessions.get(employee_id)
-        if not s or now - s["seen"] > SESSION_IDLE_SECONDS:
-            s = {"baseline": 0.0, "seen": now}
-            _sessions[employee_id] = s
+        # Forget abandoned scans so the dict can't grow forever
+        for sid, old in list(_sessions.items()):
+            if now - old["seen"] > SESSION_IDLE_SECONDS:
+                del _sessions[sid]
+        s = _sessions.setdefault(session_id, {"baseline": 0.0, "seen": now})
         s["seen"] = now
 
         if ear >= OPEN_EAR_MIN:
             s["baseline"] = max(s["baseline"], ear)
             return False
         if s["baseline"] and ear < s["baseline"] * CLOSED_RATIO:
-            _sessions.pop(employee_id, None)
+            _sessions.pop(session_id, None)
             return True
         return False
 
 
-def issue_token(employee_id: int) -> str:
+def issue_token(session_id: str) -> str:
     return create_access_token(
-        {"sub": str(employee_id), "type": "liveness"},
+        {"sub": session_id, "type": "liveness"},
         expires=timedelta(seconds=LIVENESS_TOKEN_SECONDS),
     )
 
 
-def consume_token(token: str, employee_id: int) -> bool:
-    """Valid, unexpired, for this employee, and never used before."""
+def consume_token(token: str, session_id: str) -> bool:
+    """Valid, unexpired, for this scan session, and never used before."""
     payload = decode_token(token)
-    if not payload or payload.get("type") != "liveness" or payload.get("sub") != str(employee_id):
+    if not payload or payload.get("type") != "liveness" or payload.get("sub") != session_id:
         return False
     now = time.time()
     with _lock:

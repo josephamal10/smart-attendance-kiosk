@@ -29,3 +29,19 @@ def init_db(bind=engine):
     for table in Base.metadata.sorted_tables:
         for index in table.indexes:
             index.create(bind=bind, checkfirst=True)
+    _upgrade(bind)
+
+
+def _upgrade(bind):
+    """Small in-place upgrades for databases created by older versions.
+    (A bigger project would use Alembic migrations for this.)"""
+    from sqlalchemy import inspect, text
+    from models import NO_PASSWORD
+
+    columns = {c["name"] for c in inspect(bind).get_columns("employees")}
+    with bind.begin() as conn:
+        if "category" not in columns:
+            conn.execute(text("ALTER TABLE employees ADD COLUMN category VARCHAR(30)"))
+        # Employees check in by face only; make sure no old employee password still works
+        conn.execute(text("UPDATE employees SET password = :p WHERE role = 'user' AND password != :p"),
+                     {"p": NO_PASSWORD})

@@ -23,8 +23,8 @@ def main():
     args = parser.parse_args()
 
     password = getpass.getpass("Password: ")
-    if len(password) < 6 or password != getpass.getpass("Repeat password: "):
-        sys.exit("Passwords must match and be at least 6 characters.")
+    if not password or password != getpass.getpass("Repeat password: "):
+        sys.exit("Passwords must match and can't be empty.")
 
     init_db()
     db = SessionLocal()

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from database import get_db
 from models import Employee
-from schemas import LoginRequest, TokenResponse, EmployeeCreate, EmployeeOut, EmployeePublic
+from schemas import LoginRequest, TokenResponse, PasswordChange
 from auth import hash_password, verify_password, create_access_token, require_admin
 from datetime import datetime, timedelta
 
@@ -45,32 +45,15 @@ def _record_failure(key) -> int:
     return MAX_ATTEMPTS - entry["count"]
 
 
-@router.post("/register", response_model=EmployeeOut)
-def register(data: EmployeeCreate, db: Session = Depends(get_db),
-             _admin: Employee = Depends(require_admin)):
-    """Create an employee. Admin only — otherwise anyone could make themselves an admin."""
-    existing = db.query(Employee).filter(Employee.username == data.username).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Username already exists")
-    emp = Employee(
-        name=data.name,
-        username=data.username,
-        password=hash_password(data.password),
-        role=data.role
-    )
-    db.add(emp)
-    db.commit()
-    db.refresh(emp)
-    return emp
-
-
 @router.post("/login", response_model=TokenResponse)
 def login(data: LoginRequest, request: Request, db: Session = Depends(get_db)):
+    """Admin sign-in. Employees don't sign in at all — they check in with their face."""
     key = _key(data.username, request)
     _check_lockout(key)
 
     emp = db.query(Employee).filter(Employee.username == data.username).first()
-    if not emp or not emp.is_active or not verify_password(data.password, emp.password):
+    is_admin = emp is not None and emp.role == "admin" and emp.is_active
+    if not is_admin or not verify_password(data.password, emp.password):
         attempts_left = _record_failure(key)
         if attempts_left <= 0:
             raise HTTPException(
@@ -79,7 +62,7 @@ def login(data: LoginRequest, request: Request, db: Session = Depends(get_db)):
             )
         raise HTTPException(
             status_code=401,
-            detail=f"Invalid credentials. {attempts_left} attempt(s) remaining."
+            detail=f"Wrong username or password. {attempts_left} attempt(s) remaining."
         )
 
     _failed_attempts.pop(key, None)
@@ -94,7 +77,12 @@ def login(data: LoginRequest, request: Request, db: Session = Depends(get_db)):
     }
 
 
-@router.get("/employees", response_model=list[EmployeePublic])
-def list_employees(db: Session = Depends(get_db)):
-    """Public: names for the kiosk login dropdown. Roles and other details stay private."""
-    return db.query(Employee).filter(Employee.is_active == True).order_by(Employee.name).all()
+@router.post("/change-password")
+def change_password(data: PasswordChange, db: Session = Depends(get_db),
+                    admin: Employee = Depends(require_admin)):
+    """The signed-in admin sets a new password. Any non-empty password is allowed."""
+    if not verify_password(data.current_password, admin.password):
+        raise HTTPException(status_code=400, detail="Current password is incorrect.")
+    admin.password = hash_password(data.new_password)
+    db.commit()
+    return {"message": "Password changed."}

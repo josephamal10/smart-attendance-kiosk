@@ -5,7 +5,7 @@ import 'package:http/http.dart' as http;
 import '../models/employee.dart';
 
 import '../main.dart' show navigatorKey;
-import '../screens/lock_screen.dart';
+import '../screens/kiosk_screen.dart';
 
 /// Thrown for any non-2xx response, carrying the server's `detail` message.
 class ApiException implements Exception {
@@ -102,7 +102,7 @@ class ApiService {
               onPressed: () {
                 Navigator.of(ctx, rootNavigator: true).pop();
                 navigatorKey.currentState?.pushAndRemoveUntil(
-                  MaterialPageRoute(builder: (_) => const LockScreen()),
+                  MaterialPageRoute(builder: (_) => const KioskScreen()),
                   (_) => false,
                 );
               },
@@ -124,7 +124,7 @@ class ApiService {
     return _handle(res);
   }
 
-  // ── Auth ─────────────────────────────────────────────
+  // ── Auth (admin only) ────────────────────────────────
   /// Returns the token payload, or throws ApiException with the reason
   /// (wrong password, attempts left, locked out...).
   static Future<Map<String, dynamic>> login(
@@ -137,23 +137,12 @@ class ApiService {
     return Map<String, dynamic>.from(_handle(res));
   }
 
-  static Future<List<Employee>> getEmployees() async {
-    final res = await http.get(_uri('/auth/employees'));
-    final List data = _handle(res);
-    return data.map((e) => Employee.fromJson(e)).toList();
-  }
-
-  static Future<Map<String, dynamic>> registerEmployee(
-      String name, String username, String password, String role) async {
-    final res = await http.post(
-      _uri('/auth/register'),
+  static Future<void> changePassword(String current, String next) async {
+    _handle(await http.post(
+      _uri('/auth/change-password'),
       headers: _headers,
-      body: jsonEncode({
-        'name': name, 'username': username,
-        'password': password, 'role': role
-      }),
-    );
-    return Map<String, dynamic>.from(_handle(res));
+      body: jsonEncode({'current_password': current, 'new_password': next}),
+    ));
   }
 
   // ── Face ─────────────────────────────────────────────
@@ -178,23 +167,19 @@ class ApiService {
     _handle(await http.delete(_uri('/face/image/$imageId'), headers: _headers));
   }
 
-  // ── Attendance ────────────────────────────────────────
-  /// Send one camera frame for the server-side blink check.
+  // ── Kiosk (no login: the face is the identity) ────────
+  /// One camera frame for the server-side blink check, under a per-scan session id.
   /// Response has `live`, `face_found`, `message`, and `liveness_token` once live.
-  static Future<Map<String, dynamic>> sendLivenessFrame(File imageFile) async {
-    return Map<String, dynamic>.from(await _multipart('/attendance/liveness', imageFile));
+  static Future<Map<String, dynamic>> kioskLiveness(File frame, String sessionId) async {
+    return Map<String, dynamic>.from(
+        await _multipart('/kiosk/liveness', frame, {'session_id': sessionId}));
   }
 
-  static Future<Map<String, dynamic>> verifyFace(
-      File imageFile, String livenessToken) async {
-    return Map<String, dynamic>.from(await _multipart(
-      '/attendance/verify', imageFile, {'liveness_token': livenessToken}));
-  }
-
-  static Future<AttendanceLog?> getTodayLog(int employeeId) async {
-    final res = await http.get(_uri('/attendance/today/$employeeId'), headers: _headers);
-    if (res.statusCode == 404) return null;
-    return AttendanceLog.fromJson(_handle(res));
+  /// Identify whoever is in [frame] and record their IN / OUT.
+  static Future<Map<String, dynamic>> kioskCheckIn(
+      File frame, String sessionId, String livenessToken) async {
+    return Map<String, dynamic>.from(await _multipart('/kiosk/check-in', frame,
+        {'session_id': sessionId, 'liveness_token': livenessToken}));
   }
 
   // ── Admin ─────────────────────────────────────────────
@@ -229,6 +214,32 @@ class ApiService {
       _uri('/admin/attendance/percentage',
           {'month': month?.toString(), 'year': year?.toString()}),
       headers: _headers));
+  }
+
+  static Future<List<String>> getCategories() async {
+    final List data = _handle(await http.get(_uri('/admin/categories'), headers: _headers));
+    return data.cast<String>();
+  }
+
+  static Future<Employee> createEmployee(String name, String category) async {
+    return Employee.fromJson(_handle(await http.post(
+      _uri('/admin/employees'),
+      headers: _headers,
+      body: jsonEncode({'name': name, 'category': category}),
+    )));
+  }
+
+  static Future<Employee> updateEmployee(int id,
+      {String? name, String? category, bool? isActive}) async {
+    return Employee.fromJson(_handle(await http.patch(
+      _uri('/admin/employees/$id'),
+      headers: _headers,
+      body: jsonEncode({
+        if (name != null) 'name': name,
+        if (category != null) 'category': category,
+        if (isActive != null) 'is_active': isActive,
+      }),
+    )));
   }
 
   static Future<List<Employee>> getAllEmployees() async {

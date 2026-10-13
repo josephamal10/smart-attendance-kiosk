@@ -1,74 +1,50 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../services/api_service.dart';
-import '../models/employee.dart';
 import '../widgets/ui.dart';
 import 'admin_dashboard.dart';
-import 'face_verify_screen.dart';
 
-class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+/// Admin sign-in, reached from the small icon on the kiosk screen.
+/// Stays on the stack under the dashboard so that signing out comes back here and
+/// then to the kiosk (which waits for this screen to close before reusing the camera).
+class AdminLoginScreen extends StatefulWidget {
+  const AdminLoginScreen({super.key});
   @override
-  State<LoginScreen> createState() => _LoginScreenState();
+  State<AdminLoginScreen> createState() => _AdminLoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
-  List<Employee> _employees = [];
-  Employee? _selected;
+class _AdminLoginScreenState extends State<AdminLoginScreen> {
+  final _userCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
   final _passFocus = FocusNode();
   bool _loading = false;
-  bool _loadingList = true;
   bool _obscure = true;
   String? _error;
 
   @override
-  void initState() {
-    super.initState();
-    _loadEmployees();
-  }
-
-  @override
   void dispose() {
+    _userCtrl.dispose();
     _passCtrl.dispose();
     _passFocus.dispose();
     super.dispose();
   }
 
-  Future<void> _loadEmployees() async {
-    setState(() { _loadingList = true; _error = null; });
-    try {
-      final list = await ApiService.getEmployees();
-      if (mounted) setState(() => _employees = list);
-    } catch (_) {
-      if (mounted) setState(() => _error = 'Could not reach the attendance server. Check that it is running.');
-    } finally {
-      if (mounted) setState(() => _loadingList = false);
-    }
-  }
-
   Future<void> _login() async {
-    if (_selected == null) {
-      setState(() => _error = 'Please choose your name.');
-      return;
-    }
-    if (_passCtrl.text.isEmpty) {
-      setState(() => _error = 'Please enter your password.');
+    if (_userCtrl.text.trim().isEmpty || _passCtrl.text.isEmpty) {
+      setState(() => _error = 'Enter your username and password.');
       return;
     }
     setState(() { _loading = true; _error = null; });
 
     try {
-      final res = await ApiService.login(_selected!.username, _passCtrl.text);
+      final res = await ApiService.login(_userCtrl.text.trim(), _passCtrl.text);
       ApiService.setSession(res['access_token'], res['employee_id'], res['role'], res['name']);
       if (!mounted) return;
-
-      // Admins go to the console; everyone else must pass the face check
-      Navigator.of(context).pushReplacement(MaterialPageRoute(
-        builder: (_) => res['role'] == 'admin'
-            ? const AdminDashboard()
-            : FaceVerifyScreen(role: res['role'], employeeId: res['employee_id']),
-      ));
+      _passCtrl.clear();
+      await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminDashboard()));
+      // Dashboard closed (signed out) → back to the kiosk
+      ApiService.clearSession();
+      if (mounted) Navigator.of(context).pop();
     } on ApiException catch (e) {
       // Wrong password / attempts left / locked out — the server explains which
       setState(() => _error = e.message);
@@ -108,42 +84,36 @@ class _LoginScreenState extends State<LoginScreen> {
         child: TextButton.icon(
           onPressed: () => Navigator.of(context).pop(),
           icon: const Icon(Icons.arrow_back, size: 18),
-          label: const Text('Back'),
+          label: const Text('Back to kiosk'),
           style: TextButton.styleFrom(foregroundColor: AppTheme.textSecondary, padding: EdgeInsets.zero),
         ),
       ),
       const SizedBox(height: 24),
-      Text('Sign in', style: AppTheme.h1),
+      Align(
+        alignment: Alignment.centerLeft,
+        child: Container(
+          width: 48, height: 48,
+          decoration: BoxDecoration(color: AppTheme.primarySoft, borderRadius: BorderRadius.circular(12)),
+          child: const Icon(Icons.admin_panel_settings_outlined, color: AppTheme.primary, size: 26),
+        ),
+      ),
+      const SizedBox(height: 20),
+      Text('Admin sign-in', style: AppTheme.h1),
       const SizedBox(height: 6),
-      Text('Choose your name and enter your password to continue.', style: AppTheme.muted),
+      Text('For managing employees, faces and attendance records.', style: AppTheme.muted),
       const SizedBox(height: 32),
 
-      Text('Name', style: AppTheme.label),
+      Text('Username', style: AppTheme.label),
       const SizedBox(height: 8),
-      DropdownButtonFormField<Employee>(
-        initialValue: _selected,
-        isExpanded: true,
-        icon: _loadingList
-            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-            : const Icon(Icons.expand_more),
-        hint: Text(_loadingList ? 'Loading people...' : 'Select your name'),
-        decoration: const InputDecoration(prefixIcon: Icon(Icons.person_outline, size: 20)),
-        borderRadius: BorderRadius.circular(AppTheme.radiusSm + 2),
-        dropdownColor: AppTheme.surface,
-        menuMaxHeight: 360,
-        items: _employees.map((e) => DropdownMenuItem(
-          value: e,
-          child: Row(children: [
-            InitialsAvatar(e.name, size: 26),
-            const SizedBox(width: 10),
-            Expanded(child: Text(e.name, overflow: TextOverflow.ellipsis)),
-          ]),
-        )).toList(),
-        selectedItemBuilder: (_) => _employees.map((e) => Text(e.name)).toList(),
-        onChanged: (v) {
-          setState(() { _selected = v; _error = null; });
-          _passFocus.requestFocus();
-        },
+      TextField(
+        controller: _userCtrl,
+        autofocus: true,
+        textInputAction: TextInputAction.next,
+        onSubmitted: (_) => _passFocus.requestFocus(),
+        decoration: const InputDecoration(
+          hintText: 'Enter your username',
+          prefixIcon: Icon(Icons.person_outline, size: 20),
+        ),
       ),
       const SizedBox(height: 20),
 
@@ -178,25 +148,9 @@ class _LoginScreenState extends State<LoginScreen> {
           child: _loading
               ? const SizedBox(width: 20, height: 20,
                   child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-              : const Text('Continue'),
+              : const Text('Sign in'),
         ),
       ),
-      if (_error != null && _employees.isEmpty && !_loadingList) ...[
-        const SizedBox(height: 12),
-        OutlinedButton.icon(
-          onPressed: _loadEmployees,
-          icon: const Icon(Icons.refresh, size: 18),
-          label: const Text('Try again'),
-        ),
-      ],
-      const SizedBox(height: 24),
-      const Row(children: [
-        Icon(Icons.info_outline, size: 16, color: AppTheme.textMuted),
-        SizedBox(width: 8),
-        Expanded(child: Text(
-          'Employees confirm with a quick face scan after signing in.',
-          style: TextStyle(fontSize: 12, color: AppTheme.textMuted))),
-      ]),
     ]);
   }
 }
@@ -221,13 +175,13 @@ class _BrandPanel extends StatelessWidget {
         Positioned(right: -120, bottom: -120,
             child: _ring(260, 0.09)),
         Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const BrandMark(onDark: true, subtitle: 'Attendance system'),
+          const BrandMark(onDark: true, subtitle: 'Admin console'),
           const Spacer(),
           const Text('Attendance,\nwithout the queue.',
               style: TextStyle(color: Colors.white, fontSize: 40, fontWeight: FontWeight.w700,
                   height: 1.15, letterSpacing: -1.2)),
           const SizedBox(height: 16),
-          Text('Sign in, look at the camera, blink. Your check-in is recorded in seconds.',
+          Text('Employees just look at the kiosk and blink. You manage people, faces and records here.',
               style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 16, height: 1.5)),
           const SizedBox(height: 36),
           ..._features.map((f) => Padding(
@@ -260,7 +214,7 @@ class _BrandPanel extends StatelessWidget {
   }
 
   static const _features = [
-    (Icons.face_outlined, 'Face recognition', 'Matched only against your own registered photos'),
+    (Icons.face_outlined, 'Face recognition', 'Each employee is recognised from their registered photos'),
     (Icons.visibility_outlined, 'Liveness check', 'A blink proves a real person is present'),
     (Icons.shield_outlined, 'Anti-spoofing', 'Photos and screens are rejected automatically'),
   ];

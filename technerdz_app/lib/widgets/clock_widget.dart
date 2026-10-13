@@ -6,7 +6,8 @@ import '../theme/app_theme.dart';
 /// Live clock. `large` is the kiosk welcome screen; otherwise a compact one-liner.
 class ClockWidget extends StatefulWidget {
   final bool large;
-  const ClockWidget({super.key, this.large = true});
+  final double scale; // shrinks the large clock to fit narrower spaces
+  const ClockWidget({super.key, this.large = true, this.scale = 1.0});
   @override
   State<ClockWidget> createState() => _ClockWidgetState();
 }
@@ -37,6 +38,7 @@ class _ClockWidgetState extends State<ClockWidget> {
               color: AppTheme.textPrimary, fontFeatures: AppTheme.tabular));
     }
 
+    final k = widget.scale;
     return Column(mainAxisSize: MainAxisSize.min, children: [
       Row(
         mainAxisSize: MainAxisSize.min,
@@ -44,22 +46,23 @@ class _ClockWidgetState extends State<ClockWidget> {
         textBaseline: TextBaseline.alphabetic,
         children: [
           Text(DateFormat('h:mm').format(_now),
-              style: const TextStyle(fontSize: 120, fontWeight: FontWeight.w600,
-                  height: 1, letterSpacing: -5, color: AppTheme.textPrimary,
+              style: TextStyle(fontSize: 120 * k, fontWeight: FontWeight.w600,
+                  height: 1, letterSpacing: -5 * k, color: AppTheme.textPrimary,
                   fontFeatures: AppTheme.tabular)),
-          const SizedBox(width: 14),
+          SizedBox(width: 14 * k),
           Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
             Text(DateFormat('a').format(_now),
-                style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w600, color: AppTheme.primary)),
+                style: TextStyle(fontSize: 26 * k, fontWeight: FontWeight.w600, color: AppTheme.primary)),
             Text(DateFormat('ss').format(_now),
-                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w500,
+                style: TextStyle(fontSize: 20 * k, fontWeight: FontWeight.w500,
                     color: AppTheme.textMuted, fontFeatures: AppTheme.tabular)),
           ]),
         ],
       ),
-      const SizedBox(height: 16),
+      SizedBox(height: 16 * k),
       Text(DateFormat('EEEE, d MMMM y').format(_now),
-          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w500, color: AppTheme.textSecondary)),
+          style: TextStyle(fontSize: (20 * k).clamp(14, 20).toDouble(), fontWeight: FontWeight.w500,
+              color: AppTheme.textSecondary)),
     ]);
   }
 }

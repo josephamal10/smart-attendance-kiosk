@@ -4,6 +4,10 @@ from database import Base
 from datetime import datetime, timezone
 
 
+# Stored instead of a hash for employees. Not a valid bcrypt hash, so it can never match.
+NO_PASSWORD = "!"
+
+
 def _utcnow():
     return datetime.now(timezone.utc)
 
@@ -13,9 +17,11 @@ class Employee(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), nullable=False)
-    username = Column(String(50), unique=True, nullable=False)
-    password = Column(String(255), nullable=False)
-    role = Column(String(10), default="user")  # "admin" or "user"
+    username = Column(String(50), unique=True, nullable=False)  # only meaningful for admins
+    # bcrypt hash for admins; employees check in by face and have no usable password
+    password = Column(String(255), nullable=False, default=NO_PASSWORD)
+    role = Column(String(10), default="user")  # "admin" (dashboard) or "user" (employee)
+    category = Column(String(30), nullable=True)  # HR, Developer, ... (see schemas.CATEGORIES)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=_utcnow)
 

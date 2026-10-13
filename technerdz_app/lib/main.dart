@@ -5,7 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:camera_windows/camera_windows.dart';
 import 'services/api_service.dart';
 import 'theme/app_theme.dart';
-import 'screens/lock_screen.dart';
+import 'screens/kiosk_screen.dart';
 
 // Global navigator key — used by ApiService for session expiry redirect
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -30,7 +30,7 @@ class TechnerdzApp extends StatelessWidget {
       // Wrap the Navigator itself so taps on *every* screen reset the idle timer
       // (wrapping only `home` missed every screen pushed on top of it).
       builder: (context, child) => IdleDetector(child: child!),
-      home: const LockScreen(),
+      home: const KioskScreen(),
     );
   }
 }
@@ -45,9 +45,9 @@ class IdleDetector extends StatefulWidget {
 
 class _IdleDetectorState extends State<IdleDetector> {
   Timer? _timer;
-  // Kiosk safety net: sign a user out if the machine is left alone mid-session.
-  // Must be longer than a face scan, or users get kicked out while blinking.
-  static const _timeout = Duration(seconds: 60);
+  // The kiosk is a shared machine: if an admin walks away from the dashboard,
+  // sign them out and go back to the check-in screen.
+  static const _timeout = Duration(minutes: 5);
 
   @override
   void initState() {
@@ -67,10 +67,10 @@ class _IdleDetectorState extends State<IdleDetector> {
   }
 
   void _onIdle() {
-    if (ApiService.isLoggedIn && ApiService.role != 'admin') {
+    if (ApiService.isLoggedIn) {
       ApiService.clearSession();
       navigatorKey.currentState?.pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const LockScreen()),
+        MaterialPageRoute(builder: (_) => const KioskScreen()),
         (_) => false,
       );
     }

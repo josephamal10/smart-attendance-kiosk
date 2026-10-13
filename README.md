@@ -22,14 +22,19 @@ and an admin dashboard.
 ```
 
 ## How a check-in works
-1. Employee picks their name and enters their password → access token.
-2. The app streams frames to `/attendance/liveness`. The server computes the
-   **Eye Aspect Ratio** from 478 face landmarks and waits for open → closed eyes.
-3. On a blink the server issues a **single-use liveness token** (60s, bound to that employee).
-4. `/attendance/verify` refuses without that token, runs the **anti-spoofing model**
-   (is this a live face, or a print / phone / monitor?), then compares the photo's 128-d SFace
-   embedding (cosine similarity) against only that employee's 30 registered images.
-5. First scan of the day = IN; a scan at least `MIN_CHECKOUT_MINUTES` later = OUT.
+Employees have **no username or password** — they walk up, look at the camera and blink.
+1. The kiosk streams frames to `/kiosk/liveness` under a random per-scan session id. The server
+   computes the **Eye Aspect Ratio** from 478 face landmarks and waits for open → closed eyes.
+2. On a blink it issues a **single-use liveness token** (60 s, bound to that scan session).
+3. `/kiosk/check-in` refuses without that token, runs the **anti-spoofing model**
+   (live face, or a print / phone / monitor?), then **identifies** the person: their 128-d SFace
+   embedding is compared with every active employee's ~30 registered photos. The best match must
+   clear the threshold *and* beat the runner-up by a margin, so look-alikes are refused, not guessed.
+4. First scan of the day = IN; a scan at least `MIN_CHECKOUT_MINUTES` later = OUT.
+
+Employees belong to a team: **HR, Project Manager, Admin, Developer, Tester**. "Admin" is a job
+title; dashboard access comes only from an admin account (small icon on the kiosk → username +
+password, any password you like, changeable in the dashboard; signs out after 5 idle minutes).
 
 ## Run it
 
@@ -50,7 +55,7 @@ pip install -r requirements-dev.txt
 copy .env.example .env          # then set SECRET_KEY
 python scripts/create_admin.py --username admin --name "Admin"
 uvicorn main:app --reload       # API docs at http://127.0.0.1:8000/docs
-pytest                          # 51 tests, no camera needed
+pytest                          # 58 tests, no camera needed
 ```
 
 **App** (Flutter, Windows desktop):
@@ -62,9 +67,10 @@ flutter run -d windows --dart-define=API_URL=http://<server-ip>:8000
 ```
 
 ## Security notes
-- Every route except login and the kiosk name list requires a JWT; `/admin/*` requires the admin role.
-- Users can only register / delete / read their *own* faces and attendance.
-- Only admins can create accounts; roles are validated server-side.
+- Only the two kiosk endpoints are open, and both are gated by liveness + anti-spoofing; everything
+  else needs an admin JWT. There is no public list of employee names.
+- Employees have no password at all (`!` placeholder that can never match), so their accounts
+  can't be used to sign in.
 - Login lockout is per (username, IP) so one machine can't lock someone out everywhere.
 - Blink liveness stops printed photos; the anti-spoofing CNN (MiniFASNet, ~7 ms) targets
   phone/screen replays. Its attack-detection rate still needs measuring on real attack

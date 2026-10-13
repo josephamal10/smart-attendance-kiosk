@@ -1,0 +1,180 @@
+"""Walk-up kiosk: blink → anti-spoof → 1:N identification → IN / OUT."""
+import io
+import json
+from datetime import datetime, timedelta
+
+import numpy as np
+import pytest
+
+from models import AttendanceLog, FaceImage
+from routes import kiosk_routes
+from services import attendance_service, face_service
+from services.face_engine import Face
+from services.face_service import _ear
+
+SID = "test-session-0123456789"
+
+
+def _img():
+    return {"file": ("f.jpg", io.BytesIO(b"fake"), "image/jpeg")}
+
+
+def _unit(seed: int) -> np.ndarray:
+    v = np.random.default_rng(seed).normal(size=128)
+    return v / np.linalg.norm(v)
+
+
+@pytest.fixture
+def kiosk(monkeypatch, db_session):
+    """Scripted EAR readings + a fake face engine whose next probe embedding we control."""
+    state = {"ears": [], "probe": _unit(0)}
+
+    monkeypatch.setattr(kiosk_routes, "measure_ear",
+                        lambda b: {"ok": True, "ear": state["ears"].pop(0), "message": "OK"})
+
+    class FakeEngine:
+        def detect(self, img):
+            return [Face((10, 10, 50, 60), np.zeros((5, 2)), 0.99, np.zeros(15))]
+
+        def embed(self, img, face):
+            return state["probe"]
+
+    monkeypatch.setattr(face_service, "get_engine", lambda: FakeEngine())
+    monkeypatch.setattr(face_service.cv2, "imdecode", lambda *a: np.zeros((10, 10, 3), np.uint8))
+    monkeypatch.setattr(face_service.antispoof_service, "check", lambda img, box: (True, 0.97))
+
+    def register(emp, seed):
+        db = db_session()
+        for _ in range(3):
+            db.add(FaceImage(employee_id=emp.id, image_path="x.jpg", direction="straight",
+                             embedding=json.dumps(_unit(seed).tolist())))
+        db.commit()
+        db.close()
+
+    state["register"] = register
+    return state
+
+
+def _blink(client, state, sid=SID):
+    state["ears"].extend([0.30, 0.31, 0.10])  # open, open, closed
+    for _ in range(2):
+        assert client.post("/kiosk/liveness", data={"session_id": sid}, files=_img()).json()["live"] is False
+    res = client.post("/kiosk/liveness", data={"session_id": sid}, files=_img()).json()
+    assert res["live"] is True
+    return res["liveness_token"]
+
+
+def _check_in(client, token, sid=SID):
+    return client.post("/kiosk/check-in", data={"session_id": sid, "liveness_token": token}, files=_img())
+
+
+def test_blink_then_recognised_and_checked_in(client, make_employee, kiosk):
+    priya = make_employee("priya", category="HR")
+    kiosk["register"](priya, seed=1)
+    kiosk["probe"] = _unit(1)
+    res = _check_in(client, _blink(client, kiosk)).json()
+    assert res["recognized"] and res["name"] == "Priya" and res["category"] == "HR"
+    assert res["action"] == "in"
+
+
+def test_picks_the_right_person_among_many(client, make_employee, kiosk):
+    for i, name in enumerate(["arun", "meera", "rahul"]):
+        kiosk["register"](make_employee(name), seed=10 + i)
+    kiosk["probe"] = _unit(11)  # meera
+    assert _check_in(client, _blink(client, kiosk)).json()["name"] == "Meera"
+
+
+def test_stranger_is_not_recognised(client, make_employee, kiosk):
+    kiosk["register"](make_employee("arun"), seed=1)
+    kiosk["probe"] = _unit(999)  # random vectors in 128-d are ~orthogonal
+    res = _check_in(client, _blink(client, kiosk)).json()
+    assert res["recognized"] is False
+
+
+def test_lookalikes_are_refused_not_guessed(client, make_employee, kiosk):
+    a, b = make_employee("twin-a"), make_employee("twin-b")
+    kiosk["register"](a, seed=5)
+    kiosk["register"](b, seed=5)  # identical embeddings: no margin between them
+    kiosk["probe"] = _unit(5)
+    res = _check_in(client, _blink(client, kiosk)).json()
+    assert res["recognized"] is False and "for sure" in res["message"]
+
+
+def test_disabled_employee_is_not_recognised(client, make_employee, kiosk):
+    kiosk["register"](make_employee("gone", active=False), seed=3)
+    kiosk["probe"] = _unit(3)
+    assert _check_in(client, _blink(client, kiosk)).json()["recognized"] is False
+
+
+def test_check_in_without_blink_is_refused(client, kiosk):
+    assert _check_in(client, "made-up").status_code == 403
+
+
+def test_liveness_token_is_single_use(client, make_employee, kiosk):
+    kiosk["register"](make_employee("arun"), seed=1)
+    kiosk["probe"] = _unit(1)
+    token = _blink(client, kiosk)
+    assert _check_in(client, token).status_code == 200
+    assert _check_in(client, token).status_code == 403
+
+
+def test_liveness_token_is_bound_to_its_scan_session(client, make_employee, kiosk):
+    token = _blink(client, kiosk, sid="session-aaaaaaaaaaaaaaaa")
+    assert _check_in(client, token, sid="session-bbbbbbbbbbbbbbbb").status_code == 403
+
+
+def test_bad_session_id_rejected(client):
+    res = client.post("/kiosk/liveness", data={"session_id": "../etc"}, files=_img())
+    assert res.status_code == 422
+
+
+def test_closed_eyes_alone_are_not_a_blink(client, kiosk):
+    kiosk["ears"].extend([0.08, 0.09, 0.10])  # never saw the eyes open (a photo with eyes shut)
+    for _ in range(3):
+        assert client.post("/kiosk/liveness", data={"session_id": SID}, files=_img()).json()["live"] is False
+
+
+def test_spoof_is_refused(client, make_employee, kiosk, monkeypatch):
+    kiosk["register"](make_employee("arun"), seed=1)
+    kiosk["probe"] = _unit(1)
+    monkeypatch.setattr(face_service.antispoof_service, "check", lambda img, box: (False, 0.03))
+    res = _check_in(client, _blink(client, kiosk)).json()
+    assert res["recognized"] is False and res["message"] == face_service.SPOOF_MESSAGE
+
+
+def test_quick_second_scan_does_not_check_out(client, make_employee, kiosk):
+    kiosk["register"](make_employee("arun"), seed=1)
+    kiosk["probe"] = _unit(1)
+    _check_in(client, _blink(client, kiosk))
+    assert _check_in(client, _blink(client, kiosk)).json()["action"] == "too_soon"
+
+
+def test_check_out_after_gap(client, make_employee, kiosk, monkeypatch):
+    kiosk["register"](make_employee("arun"), seed=1)
+    kiosk["probe"] = _unit(1)
+    _check_in(client, _blink(client, kiosk))
+    monkeypatch.setattr(attendance_service, "MIN_CHECKOUT_GAP", timedelta(0))
+    assert _check_in(client, _blink(client, kiosk)).json()["action"] == "out"
+
+
+def test_one_row_per_employee_per_day(db_session, make_employee):
+    from sqlalchemy.exc import IntegrityError
+    emp = make_employee("amal")
+    db = db_session()
+    db.add(AttendanceLog(employee_id=emp.id, date="2026-10-12", in_time=datetime.now()))
+    db.add(AttendanceLog(employee_id=emp.id, date="2026-10-12", in_time=datetime.now()))
+    with pytest.raises(IntegrityError):
+        db.commit()
+
+
+class _P:
+    def __init__(self, x, y):
+        self.x, self.y = x, y
+
+
+def test_ear_uses_pixel_coordinates():
+    """The same physical eye must give the same EAR regardless of frame shape."""
+    W, H = 640, 480
+    px = [(300, 240), (313, 234), (327, 234), (340, 240), (327, 246), (313, 246)]
+    lm = {i: _P(x / W, y / H) for i, (x, y) in enumerate(px)}
+    assert _ear(lm, list(range(6)), W, H) == pytest.approx(12 / 40, rel=1e-6)

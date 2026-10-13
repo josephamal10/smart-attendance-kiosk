@@ -1,10 +1,12 @@
-from fastapi import APIRouter, Depends, Query
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from auth import require_admin
 from database import get_db
-from models import AttendanceLog, Employee
-from schemas import AttendanceOut, EmployeeOut
+from models import AttendanceLog, Employee, NO_PASSWORD
+from schemas import AttendanceOut, CATEGORIES, EmployeeCreate, EmployeeOut, EmployeeUpdate
 from datetime import date
 import calendar
 import csv, io
@@ -34,9 +36,35 @@ def all_attendance(
     if end:   q = q.filter(AttendanceLog.date <= end.isoformat())
     return q.order_by(AttendanceLog.date.desc()).all()
 
+@router.get("/categories", response_model=list[str])
+def categories():
+    return CATEGORIES
+
 @router.get("/employees", response_model=list[EmployeeOut])
 def all_employees(db: Session = Depends(get_db)):
-    return db.query(Employee).filter(Employee.role == "user").all()
+    return db.query(Employee).filter(Employee.role == "user").order_by(Employee.name).all()
+
+@router.post("/employees", response_model=EmployeeOut)
+def create_employee(data: EmployeeCreate, db: Session = Depends(get_db)):
+    """Employees get no password. The username column must be unique, so it's an internal id."""
+    emp = Employee(name=data.name.strip(), category=data.category, role="user",
+                   username=f"emp-{uuid.uuid4().hex[:10]}", password=NO_PASSWORD)
+    db.add(emp)
+    db.commit()
+    db.refresh(emp)
+    return emp
+
+@router.patch("/employees/{employee_id}", response_model=EmployeeOut)
+def update_employee(employee_id: int, data: EmployeeUpdate, db: Session = Depends(get_db)):
+    emp = db.get(Employee, employee_id)
+    if not emp or emp.role != "user":
+        raise HTTPException(status_code=404, detail="Employee not found")
+    for field, value in data.model_dump(exclude_unset=True).items():
+        if value is not None:
+            setattr(emp, field, value.strip() if isinstance(value, str) and field == "name" else value)
+    db.commit()
+    db.refresh(emp)
+    return emp
 
 @router.get("/attendance/percentage")
 def attendance_percentage(
@@ -87,6 +115,7 @@ def attendance_percentage(
         result.append({
             "employee_id":   emp.id,
             "name":          emp.name,
+            "category":      emp.category,
             "attended_days": attended,
             "working_days":  working_days,
             "percentage":    percentage,
@@ -97,18 +126,18 @@ def attendance_percentage(
 @router.get("/reports/export")
 def export_csv(db: Session = Depends(get_db)):
     rows = (
-        db.query(AttendanceLog, Employee.name)
+        db.query(AttendanceLog, Employee.name, Employee.category)
         .outerjoin(Employee, Employee.id == AttendanceLog.employee_id)
         .order_by(AttendanceLog.date.desc())
         .all()
     )
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["ID", "Employee ID", "Name", "Date",
+    writer.writerow(["ID", "Employee ID", "Name", "Category", "Date",
                      "In Time", "Out Time", "Status"])
-    for log, name in rows:
+    for log, name, category in rows:
         writer.writerow([
-            log.id, log.employee_id, name or "Unknown",
+            log.id, log.employee_id, name or "Unknown", category or "",
             log.date, log.in_time, log.out_time, log.status
         ])
     output.seek(0)

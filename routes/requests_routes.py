@@ -14,6 +14,13 @@ from services import audit
 
 router = APIRouter(prefix="/admin", tags=["Requests"], dependencies=[Depends(require_admin)])
 
+_KIND = {"missed_checkout": "forgot check-out", "wrong_time": "wrong time", "other": "other",
+         "sick": "sick leave", "casual": "casual leave"}
+
+
+def _d(d: date) -> str:
+    return d.strftime("%d %b %Y")
+
 
 # ── Holidays ─────────────────────────────────────────────────────────────────
 
@@ -33,7 +40,7 @@ def add_holiday(data: HolidayIn, db: Session = Depends(get_db), admin: Employee 
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="There's already a holiday on that date.")
-    audit.record(db, admin, "holiday.added", details=f"{h.date}: {h.name}")
+    audit.record(db, admin, "holiday.added", details=f"{_d(h.date)}: {h.name}")
     db.commit()
     db.refresh(h)
     return h
@@ -43,7 +50,7 @@ def delete_holiday(holiday_id: int, db: Session = Depends(get_db), admin: Employ
     h = db.get(Holiday, holiday_id)
     if not h:
         raise HTTPException(status_code=404, detail="Holiday not found")
-    audit.record(db, admin, "holiday.removed", details=f"{h.date}: {h.name}")
+    audit.record(db, admin, "holiday.removed", details=f"{_d(h.date)}: {h.name}")
     db.delete(h)
     db.commit()
     return {"message": "Holiday removed"}
@@ -69,7 +76,7 @@ def add_leave(data: AdminLeaveIn, db: Session = Depends(get_db), admin: Employee
                       decided_at=datetime.now(), decided_by=admin.id)
     db.add(lr)
     audit.record(db, admin, "leave.added", employee_id=data.employee_id,
-                 details=f"{data.kind} {data.start_date} → {data.end_date}", reason=data.reason)
+                 details=f"{_KIND[data.kind]}: {_d(data.start_date)} → {_d(data.end_date)}", reason=data.reason)
     db.commit()
     db.refresh(lr)
     return lr
@@ -82,7 +89,7 @@ def decide_leave(leave_id: int, data: Decision, db: Session = Depends(get_db),
         raise HTTPException(status_code=404, detail="Leave request not found")
     lr.status, lr.decided_at, lr.decided_by = data.status, datetime.now(), admin.id
     audit.record(db, admin, f"leave.{data.status}", employee_id=lr.employee_id,
-                 details=f"{lr.kind} {lr.start_date} → {lr.end_date}")
+                 details=f"{_KIND.get(lr.kind, lr.kind)}: {_d(lr.start_date)} → {_d(lr.end_date)}")
     db.commit()
     db.refresh(lr)
     return lr
@@ -107,7 +114,7 @@ def decide_correction(request_id: int, data: CorrectionDecision, db: Session = D
         raise HTTPException(status_code=404, detail="Request not found")
     cr.status, cr.resolved_at = data.status, datetime.now()
     audit.record(db, admin, f"correction.{data.status}", employee_id=cr.employee_id,
-                 details=f"{cr.date}: {cr.kind}")
+                 details=f"{_d(cr.date)}: {_KIND.get(cr.kind, cr.kind)}")
     db.commit()
     db.refresh(cr)
     return cr

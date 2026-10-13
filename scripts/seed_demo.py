@@ -42,7 +42,9 @@ def main():
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from database import init_db
-    from models import AttendanceLog, Employee, FaceImage, NO_PASSWORD
+    from models import (AttendanceLog, CorrectionRequest, Employee, FaceImage, Holiday,
+                        LeaveRequest, NO_PASSWORD)
+    from services import audit
     from auth import hash_password
 
     engine = create_engine(os.environ["DATABASE_URL"])
@@ -70,8 +72,8 @@ def main():
     today = date.today()
     for e in emps:
         reliability = rng.uniform(0.6, 0.98)
-        for d in range(1, today.day + 1):
-            day = date(today.year, today.month, d)
+        for back in range(42, -1, -1):
+            day = today - timedelta(days=back)
             if day.weekday() >= 5 or rng.random() > reliability:
                 continue
             start = datetime.combine(day, time(8, 45)) + timedelta(minutes=rng.gauss(20, 18))
@@ -84,6 +86,32 @@ def main():
                 end = end if end < now and rng.random() < 0.3 else None
             db.add(AttendanceLog(employee_id=e.id, date=day.isoformat(),
                                  in_time=start, out_time=end, status="present"))
+    db.commit()
+
+    # Leave, holidays, a correction request and a forgotten check-out, so every page has content
+    admin = db.query(Employee).filter(Employee.role == "admin").first()
+    first_monday = today - timedelta(days=today.weekday() + 14)
+    db.add(Holiday(date=first_monday, name="Company foundation day"))
+    db.add(Holiday(date=today + timedelta(days=12), name="Diwali"))
+    db.add(LeaveRequest(employee_id=emps[3].id, start_date=today, end_date=today + timedelta(days=1),
+                        kind="sick", reason="Fever", status="approved", decided_by=admin.id,
+                        decided_at=datetime.now()))
+    db.add(LeaveRequest(employee_id=emps[0].id, start_date=today + timedelta(days=5),
+                        end_date=today + timedelta(days=7), kind="casual", reason="Sister's wedding"))
+    db.add(LeaveRequest(employee_id=emps[6].id, start_date=today + timedelta(days=2),
+                        end_date=today + timedelta(days=2), kind="other", reason="Visa appointment"))
+    db.add(CorrectionRequest(employee_id=emps[4].id, date=today - timedelta(days=1),
+                             kind="missed_checkout", note="Left at 6:40 PM, forgot to scan"))
+    yesterday = db.query(AttendanceLog).filter(AttendanceLog.employee_id == emps[4].id,
+                                               AttendanceLog.date < today.isoformat())                   .order_by(AttendanceLog.date.desc()).first()
+    if yesterday:
+        yesterday.out_time = datetime.combine(date.fromisoformat(yesterday.date), time(18, 0))
+        yesterday.auto_checkout = True
+        audit.record(db, None, "attendance.auto_checkout", employee_id=emps[4].id,
+                     details=f"{yesterday.date}: no check-out, closed at 18:00")
+    audit.record(db, admin, "employee.added", employee_id=emps[-1].id, details=f"{emps[-1].name} (Admin)")
+    audit.record(db, admin, "holiday.added", details=f"{today + timedelta(days=12)}: Diwali")
+    audit.record(db, admin, "leave.approved", employee_id=emps[3].id, details=f"sick {today} → {today + timedelta(days=1)}")
     db.commit()
     print(f"Demo database written to {args.db}: {len(emps)} employees, admin 'demo-admin'.")
 

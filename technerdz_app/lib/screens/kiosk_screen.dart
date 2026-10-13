@@ -10,6 +10,7 @@ import '../widgets/camera_stage.dart';
 import '../widgets/clock_widget.dart';
 import '../widgets/ui.dart';
 import 'admin_login_screen.dart';
+import 'my_attendance_screen.dart';
 
 /// The screen the app opens on. Anyone can walk up, look at the camera and blink;
 /// the server recognises them and records IN / OUT. No names, no passwords.
@@ -27,6 +28,7 @@ class _KioskScreenState extends State<KioskScreen> {
   bool _noCamera = false;
   bool _running = false;  // scan loop active
   bool _busy = false;     // a frame is being processed
+  bool _paused = false;   // someone is using My attendance: don't scan
 
   _Phase _phase = _Phase.starting;
   String _sessionId = _newSessionId();
@@ -35,7 +37,7 @@ class _KioskScreenState extends State<KioskScreen> {
   Timer? _resultTimer;
   int _resultCountdown = 0;
 
-  static const _resultSeconds = 5;
+  static const _resultSeconds = 8; // long enough to tap "My attendance"
 
   static String _newSessionId() {
     const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -106,7 +108,7 @@ class _KioskScreenState extends State<KioskScreen> {
   Future<void> _loop() async {
     while (_running && mounted) {
       var delay = const Duration(milliseconds: 600);
-      if (_phase != _Phase.result && !_busy && _cam != null) {
+      if (_phase != _Phase.result && !_paused && !_busy && _cam != null) {
         _busy = true;
         try {
           delay = await _tick();
@@ -183,6 +185,19 @@ class _KioskScreenState extends State<KioskScreen> {
         setState(() => _resultCountdown--);
       }
     });
+  }
+
+  /// Open this person's own page. Scanning pauses so nobody else gets checked in meanwhile.
+  Future<void> _openMyAttendance(Map<String, dynamic> r) async {
+    final token = r['self_token'] as String?;
+    if (token == null) return;
+    _resultTimer?.cancel();
+    setState(() => _paused = true);
+    await Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => MyAttendanceScreen(token: token, name: r['name'] ?? '', category: r['category'])));
+    if (!mounted) return;
+    _paused = false;
+    _reset();
   }
 
   void _reset() {
@@ -267,7 +282,7 @@ class _KioskScreenState extends State<KioskScreen> {
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(color: AppTheme.border),
               ),
-              child: const Icon(Icons.admin_panel_settings_outlined, size: 19, color: AppTheme.textMuted),
+              child: Icon(Icons.admin_panel_settings_outlined, size: 19, color: AppTheme.textMuted),
             ),
           ),
         ),
@@ -291,13 +306,33 @@ class _KioskScreenState extends State<KioskScreen> {
       StepRow(number: 3, title: "That's it",
           subtitle: 'You are recognised and checked in or out', done: step > 3, active: step == 3),
       const Spacer(),
-      const Row(children: [
+      Row(children: [
         Icon(Icons.lock_outline, size: 15, color: AppTheme.textMuted),
-        SizedBox(width: 8),
+        const SizedBox(width: 8),
         Expanded(child: Text('Your photo is only used to recognise you and is not stored.',
             style: TextStyle(fontSize: 12, color: AppTheme.textMuted))),
       ]),
     ]);
+  }
+
+  /// One line about today: "On time", "Late by 12 min", "Worked 8h 05m"...
+  (String, Tone, IconData) _summary(Map<String, dynamic> r) {
+    final flags = ((r['flags'] as List?) ?? const []).cast<String>();
+    final worked = r['worked_minutes'] as int?;
+    switch (r['action']) {
+      case 'in':
+        return flags.contains('late')
+            ? ('Late by ${r['late_minutes']} min', Tone.warning, Icons.schedule)
+            : ('On time', Tone.success, Icons.check_circle_outline);
+      case 'out':
+      case 'done':
+        final w = worked == null ? 'Day complete' : 'Worked ${formatMinutes(worked)} today';
+        return flags.contains('early_leave')
+            ? ('$w · left ${r['early_minutes']} min early', Tone.warning, Icons.timelapse)
+            : (w, Tone.primary, Icons.timelapse);
+      default:
+        return ('Checked in earlier today', Tone.neutral, Icons.info_outline);
+    }
   }
 
   Widget _resultCard(Map<String, dynamic> r) {
@@ -311,10 +346,11 @@ class _KioskScreenState extends State<KioskScreen> {
     final time = DateTime.tryParse(r['time'] ?? '') ?? DateTime.now();
     final name = r['name'] as String? ?? '';
     final category = r['category'] as String?;
+    final (summary, summaryTone, summaryIcon) = _summary(r);
 
     return Container(
-      width: 400,
-      padding: const EdgeInsets.fromLTRB(32, 32, 32, 24),
+      width: 420,
+      padding: const EdgeInsets.fromLTRB(32, 30, 32, 22),
       decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.circular(20),
@@ -323,11 +359,15 @@ class _KioskScreenState extends State<KioskScreen> {
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         InitialsAvatar(name, size: 64),
         const SizedBox(height: 14),
-        Text(name, textAlign: TextAlign.center, style: AppTheme.h2),
-        if (category != null) ...[
-          const SizedBox(height: 6),
-          StatusBadge(category, tone: Tone.neutral, dot: false),
-        ],
+        Text(r['greeting'] ?? name, textAlign: TextAlign.center, style: AppTheme.h2),
+        const SizedBox(height: 6),
+        Row(mainAxisSize: MainAxisSize.min, children: [
+          Flexible(child: Text(name, overflow: TextOverflow.ellipsis, style: AppTheme.muted)),
+          if (category != null) ...[
+            const SizedBox(width: 8),
+            StatusBadge(category, tone: Tone.neutral, dot: false),
+          ],
+        ]),
         const SizedBox(height: 20),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -337,18 +377,33 @@ class _KioskScreenState extends State<KioskScreen> {
             const SizedBox(width: 10),
             Text(label, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: c)),
             const SizedBox(width: 12),
-            Text(DateFormat('h:mm a').format(time), style: const TextStyle(
+            Text(DateFormat('h:mm a').format(time), style: TextStyle(
                 fontSize: 18, fontWeight: FontWeight.w600, color: AppTheme.textPrimary,
                 fontFeatures: AppTheme.tabular)),
           ]),
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 12),
+        Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(summaryIcon, size: 18, color: summaryTone.fg),
+          const SizedBox(width: 6),
+          Flexible(child: Text(summary, style: TextStyle(
+              fontSize: 15, fontWeight: FontWeight.w600, color: summaryTone.fg))),
+        ]),
+        const SizedBox(height: 6),
         Text(r['message'] ?? '', textAlign: TextAlign.center, style: AppTheme.muted),
         const SizedBox(height: 18),
-        const Divider(),
-        const SizedBox(height: 10),
+        if (r['self_token'] != null)
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () => _openMyAttendance(r),
+              icon: const Icon(Icons.calendar_month_outlined, size: 18),
+              label: const Text('My attendance'),
+            ),
+          ),
+        const SizedBox(height: 12),
         Text('Next person in $_resultCountdown s',
-            style: const TextStyle(fontSize: 12, color: AppTheme.textMuted)),
+            style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
       ]),
     );
   }

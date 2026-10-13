@@ -151,7 +151,7 @@ class StepRow extends StatelessWidget {
                 color: done || active ? AppTheme.textPrimary : AppTheme.textMuted)),
             if (subtitle != null) ...[
               const SizedBox(height: 2),
-              Text(subtitle!, style: const TextStyle(fontSize: 13, color: AppTheme.textMuted, height: 1.4)),
+              Text(subtitle!, style: TextStyle(fontSize: 13, color: AppTheme.textMuted, height: 1.4)),
             ],
           ]),
         ),

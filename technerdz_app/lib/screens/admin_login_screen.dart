@@ -94,7 +94,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
         child: Container(
           width: 48, height: 48,
           decoration: BoxDecoration(color: AppTheme.primarySoft, borderRadius: BorderRadius.circular(12)),
-          child: const Icon(Icons.admin_panel_settings_outlined, color: AppTheme.primary, size: 26),
+          child: Icon(Icons.admin_panel_settings_outlined, color: AppTheme.primary, size: 26),
         ),
       ),
       const SizedBox(height: 20),
@@ -161,7 +161,7 @@ class _BrandPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft, end: Alignment.bottomRight,
           colors: [AppTheme.primaryDark, AppTheme.primary],

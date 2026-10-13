@@ -247,4 +247,142 @@ class ApiService {
       await http.get(_uri('/admin/employees'), headers: _headers));
     return data.map((e) => Employee.fromJson(e)).toList();
   }
+
+  // ── Attendance corrections ────────────────────────────
+  static Future<AttendanceLog> correctAttendance(int logId,
+      {String? inTime, String? outTime, required String reason}) async {
+    return AttendanceLog.fromJson(_handle(await http.patch(
+      _uri('/admin/attendance/$logId'), headers: _headers,
+      body: jsonEncode({
+        if (inTime != null) 'in_time': inTime,
+        if (outTime != null) 'out_time': outTime,
+        'reason': reason,
+      }),
+    )));
+  }
+
+  static Future<AttendanceLog> addAttendance(int employeeId, DateTime date,
+      {required String inTime, String? outTime, required String reason}) async {
+    return AttendanceLog.fromJson(_handle(await http.post(
+      _uri('/admin/attendance'), headers: _headers,
+      body: jsonEncode({
+        'employee_id': employeeId,
+        'date': ymd(date),
+        'in_time': inTime,
+        if (outTime != null && outTime.isNotEmpty) 'out_time': outTime,
+        'reason': reason,
+      }),
+    )));
+  }
+
+  static String ymd(DateTime d) =>
+      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  // ── Holidays ─────────────────────────────────────────
+  static Future<List<Holiday>> getHolidays({int? year}) async {
+    final List data = _handle(await http.get(
+        _uri('/admin/holidays', {'year': year?.toString()}), headers: _headers));
+    return data.map((e) => Holiday.fromJson(e)).toList();
+  }
+
+  static Future<void> addHoliday(DateTime date, String name) async {
+    _handle(await http.post(_uri('/admin/holidays'), headers: _headers,
+        body: jsonEncode({'date': ymd(date), 'name': name})));
+  }
+
+  static Future<void> deleteHoliday(int id) async {
+    _handle(await http.delete(_uri('/admin/holidays/$id'), headers: _headers));
+  }
+
+  // ── Leave & correction requests ──────────────────────
+  static Future<List<LeaveRequest>> getLeave({String? status}) async {
+    final List data = _handle(await http.get(
+        _uri('/admin/leave', {'status': status}), headers: _headers));
+    return data.map((e) => LeaveRequest.fromJson(e)).toList();
+  }
+
+  static Future<void> addLeave(int employeeId, DateTime start, DateTime end, String kind, String reason) async {
+    _handle(await http.post(_uri('/admin/leave'), headers: _headers, body: jsonEncode({
+      'employee_id': employeeId, 'start_date': ymd(start), 'end_date': ymd(end),
+      'kind': kind, 'reason': reason,
+    })));
+  }
+
+  static Future<void> decideLeave(int id, bool approve) async {
+    _handle(await http.post(_uri('/admin/leave/$id/decision'), headers: _headers,
+        body: jsonEncode({'status': approve ? 'approved' : 'rejected'})));
+  }
+
+  static Future<List<CorrectionRequest>> getCorrections({String? status}) async {
+    final List data = _handle(await http.get(
+        _uri('/admin/corrections', {'status': status}), headers: _headers));
+    return data.map((e) => CorrectionRequest.fromJson(e)).toList();
+  }
+
+  static Future<void> decideCorrection(int id, bool resolved) async {
+    _handle(await http.post(_uri('/admin/corrections/$id/decision'), headers: _headers,
+        body: jsonEncode({'status': resolved ? 'resolved' : 'rejected'})));
+  }
+
+  // ── Insights ─────────────────────────────────────────
+  static Future<Map<String, dynamic>> getAnalytics({int days = 30}) async {
+    return Map<String, dynamic>.from(_handle(await http.get(
+        _uri('/admin/analytics', {'days': '$days'}), headers: _headers)));
+  }
+
+  static Future<List<AuditEntry>> getAudit({int limit = 300}) async {
+    final List data = _handle(await http.get(
+        _uri('/admin/audit', {'limit': '$limit'}), headers: _headers));
+    return data.map((e) => AuditEntry.fromJson(e)).toList();
+  }
+
+  // ── Settings ─────────────────────────────────────────
+  static Future<Map<String, dynamic>> getSettings() async {
+    return Map<String, dynamic>.from(_handle(await http.get(_uri('/admin/settings'), headers: _headers)));
+  }
+
+  static Future<Map<String, dynamic>> saveSettings(Map<String, dynamic> settings) async {
+    final body = Map<String, dynamic>.from(settings)..remove('smtp_configured');
+    return Map<String, dynamic>.from(_handle(await http.put(
+        _uri('/admin/settings'), headers: _headers, body: jsonEncode(body))));
+  }
+
+  static Future<String> sendTestEmail() async {
+    final res = _handle(await http.post(_uri('/admin/settings/test-email'), headers: _headers));
+    return res['message'] as String;
+  }
+
+  // ── Self-service (token from a kiosk check-in, not the admin session) ──
+  static Map<String, String> _self(String token) =>
+      {'Content-Type': 'application/json', 'Authorization': 'Bearer $token'};
+
+  /// Self-service calls must not trigger the admin "session expired" dialog,
+  /// so they check the status themselves instead of using [_handle].
+  static dynamic _handleSelf(http.Response res) {
+    dynamic body;
+    try {
+      body = res.body.isEmpty ? null : jsonDecode(res.body);
+    } on FormatException {
+      body = null;
+    }
+    if (res.statusCode >= 200 && res.statusCode < 300) return body;
+    final detail = body is Map ? body['detail'] : null;
+    throw ApiException(res.statusCode, detail is String ? detail : 'Please try again.');
+  }
+
+  static Future<Map<String, dynamic>> mySummary(String token) async {
+    return Map<String, dynamic>.from(_handleSelf(await http.get(_uri('/me'), headers: _self(token))));
+  }
+
+  static Future<void> requestLeave(String token, DateTime start, DateTime end, String kind, String reason) async {
+    _handleSelf(await http.post(_uri('/me/leave'), headers: _self(token), body: jsonEncode({
+      'start_date': ymd(start), 'end_date': ymd(end), 'kind': kind, 'reason': reason,
+    })));
+  }
+
+  static Future<void> reportProblem(String token, DateTime date, String kind, String note) async {
+    _handleSelf(await http.post(_uri('/me/corrections'), headers: _self(token), body: jsonEncode({
+      'date': ymd(date), 'kind': kind, 'note': note,
+    })));
+  }
 }

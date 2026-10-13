@@ -34,7 +34,7 @@ class _ClockWidgetState extends State<ClockWidget> {
   Widget build(BuildContext context) {
     if (!widget.large) {
       return Text(DateFormat('h:mm a').format(_now),
-          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600,
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600,
               color: AppTheme.textPrimary, fontFeatures: AppTheme.tabular));
     }
 

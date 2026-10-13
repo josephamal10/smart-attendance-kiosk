@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:technerdz_app/models/employee.dart';
 import 'package:technerdz_app/screens/admin_login_screen.dart';
 import 'package:technerdz_app/screens/kiosk_screen.dart';
+import 'package:technerdz_app/widgets/ui.dart';
 
 void main() {
   testWidgets('Kiosk opens on check-in instructions with a small admin entry', (tester) async {
@@ -43,5 +44,24 @@ void main() {
     });
     expect(log.inTime!.hour, 9);
     expect(log.outTime, isNull);
+  });
+
+  test('Durations read like "8h 05m"', () {
+    expect(formatMinutes(485), '8h 05m');
+    expect(formatMinutes(59), '0h 59m');
+  });
+
+  testWidgets('Flags become readable badges', (tester) async {
+    await tester.pumpWidget(const MaterialApp(home: Scaffold(body: FlagBadges(
+        flags: ['late', 'half_day', 'missed_checkout'], lateMinutes: 16))));
+    expect(find.text('Late 16m'), findsOneWidget);
+    expect(find.text('Half day'), findsOneWidget);
+    expect(find.text('Missed check-out'), findsOneWidget);
+  });
+
+  testWidgets('No flags shows the "clean" badge when given', (tester) async {
+    await tester.pumpWidget(const MaterialApp(home: Scaffold(body: FlagBadges(
+        flags: [], whenClean: StatusBadge('On time', tone: Tone.success)))));
+    expect(find.text('On time'), findsOneWidget);
   });
 }

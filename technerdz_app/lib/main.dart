@@ -5,20 +5,47 @@ import 'package:flutter/services.dart';
 import 'package:camera_windows/camera_windows.dart';
 import 'services/api_service.dart';
 import 'theme/app_theme.dart';
+import 'theme/appearance.dart';
 import 'screens/kiosk_screen.dart';
 
 // Global navigator key — used by ApiService for session expiry redirect
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Appearance.load();
   // Native camera plugin only on Windows (the web build is used for UI previews/screenshots)
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) CameraWindows.registerWith();
   runApp(const TechnerdzApp());
 }
 
-class TechnerdzApp extends StatelessWidget {
+class TechnerdzApp extends StatefulWidget {
   const TechnerdzApp({super.key});
+
+  @override
+  State<TechnerdzApp> createState() => _TechnerdzAppState();
+}
+
+class _TechnerdzAppState extends State<TechnerdzApp> {
+  @override
+  void initState() {
+    super.initState();
+    Appearance.dark.addListener(_onModeChanged);
+  }
+
+  @override
+  void dispose() {
+    Appearance.dark.removeListener(_onModeChanged);
+    super.dispose();
+  }
+
+  void _onModeChanged() {
+    setState(() {});
+    // Repaint every screen (including ones under the current page) in the new colours
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) Appearance.rebuildAll(context);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {

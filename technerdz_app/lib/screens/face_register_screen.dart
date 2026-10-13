@@ -249,13 +249,13 @@ class _FaceRegisterScreenState extends State<FaceRegisterScreen> {
                         padding: const EdgeInsets.all(28),
                         decoration: BoxDecoration(
                           color: AppTheme.surface, borderRadius: BorderRadius.circular(20)),
-                        child: const Column(mainAxisSize: MainAxisSize.min, children: [
+                        child: Column(mainAxisSize: MainAxisSize.min, children: [
                           CircleAvatar(radius: 32, backgroundColor: AppTheme.successSoft,
                               child: Icon(Icons.check_rounded, color: AppTheme.success, size: 36)),
-                          SizedBox(height: 16),
-                          Text('Face registered',
+                          const SizedBox(height: 16),
+                          const Text('Face registered',
                               style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
-                          SizedBox(height: 4),
+                          const SizedBox(height: 4),
                           Text('This person can now check in at the kiosk.',
                               style: TextStyle(color: AppTheme.textSecondary)),
                         ]),

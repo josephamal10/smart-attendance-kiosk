@@ -36,6 +36,21 @@ Employees belong to a team: **HR, Project Manager, Admin, Developer, Tester**. "
 title; dashboard access comes only from an admin account (small icon on the kiosk → username +
 password, any password you like, changeable in the dashboard; signs out after 5 idle minutes).
 
+## Features
+| For employees (kiosk) | For admins (dashboard) |
+|---|---|
+| Walk up, blink, recognised — no password | Overview: present, late, not in, by team, pending requests |
+| "Good morning, Priya! On time" / "Late by 12 min" / "Worked 8h 05m" | Attendance with Late / Left early / Half day / Missed check-out badges |
+| **My attendance** (by face): month stats, recent days | Corrections and added days with a required reason |
+| Request leave, report a missed check-out | Requests: approve/reject leave, fix reported records |
+| Closes itself after a minute idle | Holidays calendar (excluded from absences) |
+| | Analytics: daily on-time vs late, arrival trend, late by team, punctuality |
+| | Audit log of every admin and system action |
+| | Settings: office hours, grace period, half day, days off, HR email, dark mode |
+
+Automatic jobs: forgotten check-outs are closed at office end time (flagged), and HR gets a
+daily summary email (Gmail SMTP; saved to `reports/emails/` until SMTP is configured).
+
 ## Run it
 
 **Quickest (Windows, after setup):** double-click `run.bat`. It starts the server in its own
@@ -55,7 +70,7 @@ pip install -r requirements-dev.txt
 copy .env.example .env          # then set SECRET_KEY
 python scripts/create_admin.py --username admin --name "Admin"
 uvicorn main:app --reload       # API docs at http://127.0.0.1:8000/docs
-pytest                          # 58 tests, no camera needed
+pytest                          # 84 tests, no camera needed
 ```
 
 **App** (Flutter, Windows desktop):

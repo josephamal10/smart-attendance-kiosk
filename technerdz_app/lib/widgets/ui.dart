@@ -14,7 +14,7 @@ extension ToneColors on Tone {
         Tone.danger  => AppTheme.danger,
       };
   Color get bg => switch (this) {
-        Tone.neutral => const Color(0xFFF2F4F7),
+        Tone.neutral => AppTheme.neutralSoft,
         Tone.primary => AppTheme.primarySoft,
         Tone.success => AppTheme.successSoft,
         Tone.warning => AppTheme.warningSoft,
@@ -38,9 +38,9 @@ class BrandMark extends StatelessWidget {
         borderRadius: BorderRadius.circular(size * 0.28),
         gradient: onDark
             ? null
-            : const LinearGradient(
+            : LinearGradient(
                 begin: Alignment.topLeft, end: Alignment.bottomRight,
-                colors: [Color(0xFF3B82F6), AppTheme.primaryDark]),
+                colors: [const Color(0xFF3B82F6), AppTheme.primaryDark]),
         color: onDark ? Colors.white.withValues(alpha: 0.14) : null,
         border: onDark ? Border.all(color: Colors.white.withValues(alpha: 0.25)) : null,
       ),
@@ -149,12 +149,12 @@ class StatCard extends StatelessWidget {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(label, style: AppTheme.muted),
               const SizedBox(height: 10),
-              Text(value, style: const TextStyle(
+              Text(value, style: TextStyle(
                   fontSize: 30, fontWeight: FontWeight.w700, color: AppTheme.textPrimary,
                   letterSpacing: -0.8, fontFeatures: AppTheme.tabular)),
               if (caption != null) ...[
                 const SizedBox(height: 4),
-                Text(caption!, style: const TextStyle(fontSize: 12, color: AppTheme.textMuted)),
+                Text(caption!, style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
               ],
             ]),
           ),
@@ -179,7 +179,7 @@ class EmptyState extends StatelessWidget {
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Container(
             width: 52, height: 52,
-            decoration: const BoxDecoration(color: AppTheme.surfaceMuted, shape: BoxShape.circle),
+            decoration: BoxDecoration(color: AppTheme.surfaceMuted, shape: BoxShape.circle),
             child: Icon(icon, color: AppTheme.textMuted, size: 26),
           ),
           const SizedBox(height: 14),
@@ -247,8 +247,8 @@ class DataCard extends StatelessWidget {
           decoration: BoxDecoration(
             color: AppTheme.surfaceMuted,
             border: Border(
-              top: header == null ? BorderSide.none : const BorderSide(color: AppTheme.border),
-              bottom: const BorderSide(color: AppTheme.border),
+              top: header == null ? BorderSide.none : BorderSide(color: AppTheme.border),
+              bottom: BorderSide(color: AppTheme.border),
             ),
           ),
           child: Row(children: [
@@ -263,7 +263,7 @@ class DataCard extends StatelessWidget {
             decoration: BoxDecoration(
               border: i == rows.length - 1
                   ? null
-                  : const Border(bottom: BorderSide(color: AppTheme.border)),
+                  : Border(bottom: BorderSide(color: AppTheme.border)),
             ),
             child: Row(children: [
               for (var j = 0; j < columns.length; j++) _cell(columns[j], rows[i][j]),
@@ -287,10 +287,10 @@ class PersonCell extends StatelessWidget {
         Flexible(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
             Text(name, overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
             if (secondary != null)
               Text(secondary!, overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 12, color: AppTheme.textMuted)),
+                  style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
           ]),
         ),
       ]);
@@ -317,4 +317,38 @@ class CameraPill extends StatelessWidget {
               color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500))),
         ]),
       );
+}
+
+/// "8h 05m"
+String formatMinutes(int minutes) => '${minutes ~/ 60}h ${(minutes % 60).toString().padLeft(2, '0')}m';
+
+/// Late 16m · Left early · Half day · Missed check-out, as compact badges.
+class FlagBadges extends StatelessWidget {
+  final List<String> flags;
+  final int lateMinutes;
+  final int earlyMinutes;
+  /// Shown when there are no flags (e.g. an "On time" badge); null shows nothing.
+  final Widget? whenClean;
+  const FlagBadges({super.key, required this.flags, this.lateMinutes = 0, this.earlyMinutes = 0,
+      this.whenClean});
+
+  static (String, Tone) describe(String flag, int late, int early) => switch (flag) {
+        'late'            => ('Late ${late}m', Tone.warning),
+        'early_leave'     => ('Left early ${early}m', Tone.warning),
+        'half_day'        => ('Half day', Tone.danger),
+        'missed_checkout' => ('Missed check-out', Tone.danger),
+        _                 => (flag, Tone.neutral),
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    if (flags.isEmpty) return whenClean ?? const SizedBox.shrink();
+    return Wrap(spacing: 6, runSpacing: 6, children: [
+      for (final f in flags)
+        Builder(builder: (_) {
+          final (label, tone) = describe(f, lateMinutes, earlyMinutes);
+          return StatusBadge(label, tone: tone);
+        }),
+    ]);
+  }
 }

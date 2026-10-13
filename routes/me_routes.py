@@ -64,6 +64,7 @@ def my_summary(emp: Employee = Depends(get_self), db: Session = Depends(get_db))
             "out_time": l.out_time,
             "flags": evals[l.id].flags,
             "late_minutes": evals[l.id].late_minutes,
+            "early_minutes": evals[l.id].early_minutes,
             "worked_minutes": evals[l.id].worked_minutes,
         } for l in logs[:14]],
         "leave_requests": [LeaveOut.model_validate(lr).model_dump(mode="json") for lr in

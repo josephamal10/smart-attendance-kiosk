@@ -6,21 +6,46 @@ import '../models/employee.dart';
 import '../widgets/clock_widget.dart';
 import '../widgets/ui.dart';
 import 'face_register_screen.dart';
+import 'admin/analytics_page.dart';
+import 'admin/attendance_edit_dialog.dart';
+import 'admin/audit_page.dart';
+import 'admin/holidays_page.dart';
+import 'admin/requests_page.dart';
+import 'admin/settings_page.dart';
+import '../theme/appearance.dart';
 
-enum _Page { overview, attendance, employees }
+enum _Page { overview, attendance, employees, requests, holidays, analytics, audit, settings }
 
 extension on _Page {
   String get title => switch (this) {
         _Page.overview   => 'Overview',
         _Page.attendance => 'Attendance records',
         _Page.employees  => 'Employees',
+        _Page.requests   => 'Requests',
+        _Page.holidays   => 'Holidays',
+        _Page.analytics  => 'Analytics',
+        _Page.audit      => 'Audit log',
+        _Page.settings   => 'Settings',
       };
+  String get navLabel => this == _Page.attendance ? 'Attendance' : title;
   IconData get icon => switch (this) {
         _Page.overview   => Icons.space_dashboard_outlined,
         _Page.attendance => Icons.event_note_outlined,
         _Page.employees  => Icons.groups_outlined,
+        _Page.requests   => Icons.inbox_outlined,
+        _Page.holidays   => Icons.celebration_outlined,
+        _Page.analytics  => Icons.insights_outlined,
+        _Page.audit      => Icons.history,
+        _Page.settings   => Icons.settings_outlined,
       };
 }
+
+/// Sidebar groups
+const _navGroups = [
+  ('WORKSPACE', [_Page.overview, _Page.attendance, _Page.employees]),
+  ('MANAGE', [_Page.requests, _Page.holidays]),
+  ('INSIGHTS', [_Page.analytics, _Page.audit]),
+];
 
 /// Employees without a category yet (added before categories existed).
 const _noTeam = 'No team';
@@ -43,6 +68,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
   final Map<int, Map<String, dynamic>> _monthStats = {};
   DateTimeRange? _range;
   String? _team; // team filter on the Attendance page (null = everyone)
+  int _pending = 0; // leave + correction requests waiting for a decision
+  int _onLeaveToday = 0;
 
   static final _day = DateFormat('yyyy-MM-dd');
 
@@ -63,13 +90,22 @@ class _AdminDashboardState extends State<AdminDashboard> {
         ),
         ApiService.getAllEmployees(),
         ApiService.getAttendancePercentage(),
+        ApiService.getLeave(status: 'pending'),
+        ApiService.getCorrections(status: 'pending'),
+        ApiService.getLeave(status: 'approved'),
         if (_categories.isEmpty) ApiService.getCategories(),
       ]);
       final emps = results[2] as List<Employee>;
       final counts = await Future.wait(emps.map((e) => ApiService.getFaceCount(e.id)));
       if (!mounted) return;
       setState(() {
-        if (results.length > 4) _categories = results[4] as List<String>;
+        if (results.length > 7) _categories = results[7] as List<String>;
+        _pending = results[4].length + results[5].length;
+        final today = DateTime.now();
+        final day = DateTime(today.year, today.month, today.day);
+        _onLeaveToday = (results[6] as List<LeaveRequest>)
+            .where((l) => !l.startDate.isAfter(day) && !l.endDate.isBefore(day))
+            .map((l) => l.employeeId).toSet().length;
         _todayLogs = (results[0] as List<AttendanceLog>)
           ..sort((a, b) => (b.inTime ?? DateTime(0)).compareTo(a.inTime ?? DateTime(0)));
         _allLogs = (results[1] as List<AttendanceLog>)
@@ -132,6 +168,24 @@ class _AdminDashboardState extends State<AdminDashboard> {
         context: context, builder: (_) => _EmployeeDialog(categories: _categories, employee: emp));
     if (saved != null && mounted) {
       _toast('Saved changes for ${saved.name}.');
+      _loadData();
+    }
+  }
+
+  Future<void> _editLog(AttendanceLog log) async {
+    final saved = await showDialog<AttendanceLog>(context: context,
+        builder: (_) => AttendanceEditDialog(log: log, employees: _employees));
+    if (saved != null && mounted) {
+      _toast('Record corrected. The change is in the audit log.');
+      _loadData();
+    }
+  }
+
+  Future<void> _addLog() async {
+    final saved = await showDialog<AttendanceLog>(context: context,
+        builder: (_) => AttendanceEditDialog(employees: _employees));
+    if (saved != null && mounted) {
+      _toast('Record added.');
       _loadData();
     }
   }
@@ -247,6 +301,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
                             _Page.overview   => _overview(),
                             _Page.attendance => _attendance(),
                             _Page.employees  => _employeesPage(),
+                            _Page.requests   => RequestsPage(employees: _employees, onChanged: _loadData),
+                            _Page.holidays   => HolidaysPage(onChanged: _loadData),
+                            _Page.analytics  => const AnalyticsPage(),
+                            _Page.audit      => AuditPage(employees: _employees),
+                            _Page.settings   => const SettingsPage(),
                           },
                         ),
                       ),
@@ -262,7 +321,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final admin = ApiService.name ?? 'Administrator';
     return Container(
       width: 248,
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: AppTheme.surface,
         border: Border(right: BorderSide(color: AppTheme.border)),
       ),
@@ -272,19 +331,41 @@ class _AdminDashboardState extends State<AdminDashboard> {
           padding: EdgeInsets.symmetric(horizontal: 8),
           child: BrandMark(size: 34, subtitle: 'Admin console'),
         ),
-        const SizedBox(height: 32),
-        Padding(
-          padding: const EdgeInsets.only(left: 12, bottom: 8),
-          child: Text('MENU', style: AppTheme.overline),
+        const SizedBox(height: 24),
+        Expanded(
+          child: ListView(children: [
+            for (final (group, pages) in _navGroups) ...[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 12, 0, 8),
+                child: Text(group, style: AppTheme.overline),
+              ),
+              for (final p in pages)
+                _NavItem(
+                  icon: p.icon,
+                  label: p.navLabel,
+                  selected: _page == p,
+                  badge: p == _Page.requests && _pending > 0 ? _pending : null,
+                  onTap: () => setState(() => _page = p),
+                ),
+            ],
+          ]),
         ),
-        for (final p in _Page.values)
-          _NavItem(
-            icon: p.icon,
-            label: p == _Page.attendance ? 'Attendance' : p.title,
-            selected: _page == p,
-            onTap: () => setState(() => _page = p),
+        _NavItem(
+          icon: _Page.settings.icon,
+          label: 'Settings',
+          selected: _page == _Page.settings,
+          onTap: () => setState(() => _page = _Page.settings),
+        ),
+        ValueListenableBuilder<bool>(
+          valueListenable: Appearance.dark,
+          builder: (_, dark, __) => _NavItem(
+            icon: dark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
+            label: dark ? 'Light mode' : 'Dark mode',
+            selected: false,
+            onTap: () => Appearance.setDark(!dark),
           ),
-        const Spacer(),
+        ),
+        const SizedBox(height: 8),
         const Divider(),
         const SizedBox(height: 12),
         Row(children: [
@@ -294,7 +375,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(admin, overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-              const Text('Administrator', style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
+              Text('Administrator', style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
             ]),
           ),
           PopupMenuButton<String>(
@@ -343,11 +424,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
           label: const Text('Export CSV'),
         ),
         const SizedBox(width: 12),
-        ElevatedButton.icon(
-          onPressed: _categories.isEmpty ? null : _addEmployee,
-          icon: const Icon(Icons.person_add_alt_1_outlined, size: 18),
-          label: const Text('Add employee'),
-        ),
+        if (_page == _Page.attendance)
+          ElevatedButton.icon(
+            onPressed: _employees.isEmpty ? null : _addLog,
+            icon: const Icon(Icons.add, size: 18),
+            label: const Text('Add record'),
+          )
+        else
+          ElevatedButton.icon(
+            onPressed: _categories.isEmpty ? null : _addEmployee,
+            icon: const Icon(Icons.person_add_alt_1_outlined, size: 18),
+            label: const Text('Add employee'),
+          ),
       ]),
     );
   }
@@ -393,7 +481,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final total = active.length;
     final present = _todayLogs.length;
     final out = _todayLogs.where((l) => l.outTime != null).length;
-    final notIn = (total - present).clamp(0, total);
+    final late = _todayLogs.where((l) => l.isLate).length;
+    final notIn = (total - present - _onLeaveToday).clamp(0, total);
     final noFace = active.where((e) => (_faceCounts[e.id] ?? 0) == 0).length;
     final pct = total == 0 ? 0 : (present * 100 / total).round();
 
@@ -406,13 +495,28 @@ class _AdminDashboardState extends State<AdminDashboard> {
         Expanded(child: StatCard(label: 'Present today', value: '$present',
             icon: Icons.how_to_reg_outlined, tone: Tone.success, caption: '$pct% of the team')),
         const SizedBox(width: AppTheme.gap),
-        Expanded(child: StatCard(label: 'Checked out', value: '$out',
-            icon: Icons.logout, tone: Tone.neutral, caption: '${present - out} still working')),
+        Expanded(child: StatCard(label: 'Late today', value: '$late',
+            icon: Icons.running_with_errors_outlined, tone: late > 0 ? Tone.warning : Tone.neutral,
+            caption: '$out checked out · ${present - out} still working')),
         const SizedBox(width: AppTheme.gap),
         Expanded(child: StatCard(label: 'Not checked in', value: '$notIn',
-            icon: Icons.schedule_outlined, tone: notIn > 0 ? Tone.warning : Tone.neutral,
-            caption: 'As of ${DateFormat('h:mm a').format(DateTime.now())}')),
+            icon: Icons.schedule_outlined, tone: notIn > 0 ? Tone.danger : Tone.neutral,
+            caption: _onLeaveToday > 0
+                ? '$_onLeaveToday on leave · as of ${DateFormat('h:mm a').format(DateTime.now())}'
+                : 'As of ${DateFormat('h:mm a').format(DateTime.now())}')),
       ])),
+      if (_pending > 0) ...[
+        const SizedBox(height: AppTheme.gap),
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+            onTap: () => setState(() => _page = _Page.requests),
+            child: InfoBanner('$_pending request${_pending == 1 ? '' : 's'} waiting for you — '
+                'leave or attendance corrections. Click to review.', tone: Tone.primary),
+          ),
+        ),
+      ],
       const SizedBox(height: 24),
       Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Expanded(
@@ -474,7 +578,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
         const Col('Check in', flex: 2),
         const Col('Check out', flex: 2),
         if (showDate) const Col('Hours', flex: 2),
-        const Col('Status', flex: 2),
+        const Col('Status', flex: 3),
+        const Col('', flex: 1, alignEnd: true),
       ],
       rows: [
         for (final l in logs)
@@ -484,13 +589,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
             Text(l.inTime == null ? '—' : time.format(l.inTime!), style: AppTheme.body),
             Text(l.outTime == null ? '—' : time.format(l.outTime!), style: AppTheme.body),
             if (showDate) Text(_hours(l), style: AppTheme.body.copyWith(fontFeatures: AppTheme.tabular)),
-            l.outTime != null
-                ? const StatusBadge('Completed', tone: Tone.success)
-                : l.inTime != null
-                    ? (showDate && l.date != _day.format(DateTime.now())
-                        ? const StatusBadge('No check-out', tone: Tone.warning)
-                        : const StatusBadge('Working', tone: Tone.primary))
-                    : const StatusBadge('Absent', tone: Tone.danger),
+            Wrap(spacing: 6, runSpacing: 6, children: [
+              if (l.outTime == null && l.inTime != null && l.date == _day.format(DateTime.now()))
+                const StatusBadge('Working', tone: Tone.primary)
+              else if (l.outTime == null && l.inTime != null)
+                const StatusBadge('No check-out', tone: Tone.warning),
+              FlagBadges(flags: l.flags, lateMinutes: l.lateMinutes, earlyMinutes: l.earlyMinutes,
+                  whenClean: l.outTime != null ? const StatusBadge('Completed', tone: Tone.success) : null),
+            ]),
+            IconButton(tooltip: 'Correct this record', onPressed: () => _editLog(l),
+                icon: const Icon(Icons.edit_outlined, size: 18)),
           ],
       ],
     );
@@ -558,7 +666,8 @@ class _NavItem extends StatelessWidget {
   final String label;
   final bool selected;
   final VoidCallback onTap;
-  const _NavItem({required this.icon, required this.label, required this.selected, required this.onTap});
+  final int? badge;
+  const _NavItem({required this.icon, required this.label, required this.selected, required this.onTap, this.badge});
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -574,10 +683,16 @@ class _NavItem extends StatelessWidget {
               child: Row(children: [
                 Icon(icon, size: 20, color: selected ? AppTheme.primary : AppTheme.textSecondary),
                 const SizedBox(width: 12),
-                Text(label, style: TextStyle(
+                Expanded(child: Text(label, style: TextStyle(
                     fontSize: 14,
                     fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                    color: selected ? AppTheme.primary : AppTheme.textSecondary)),
+                    color: selected ? AppTheme.primary : AppTheme.textSecondary))),
+                if (badge != null)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                    decoration: BoxDecoration(color: AppTheme.primary, borderRadius: BorderRadius.circular(999)),
+                    child: Text('$badge', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
+                  ),
               ]),
             ),
           ),
@@ -666,7 +781,7 @@ class _EmployeesTableState extends State<_EmployeesTable> {
           ? const StatusBadge('Not set', tone: Tone.warning)
           : StatusBadge(e.category!, tone: Tone.neutral, dot: false),
       pct == null
-          ? const Text('—', style: TextStyle(color: AppTheme.textMuted))
+          ? Text('—', style: TextStyle(color: AppTheme.textMuted))
           : SizedBox(
               width: 170,
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
@@ -675,7 +790,7 @@ class _EmployeesTableState extends State<_EmployeesTable> {
                       fontSize: 14, fontWeight: FontWeight.w600, color: tone.fg)),
                   const SizedBox(width: 6),
                   Text('${stats!['attended_days']}/${stats['working_days']} days',
-                      style: const TextStyle(fontSize: 12, color: AppTheme.textMuted)),
+                      style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
                 ]),
                 const SizedBox(height: 6),
                 ClipRRect(
@@ -700,7 +815,7 @@ class _EmployeesTableState extends State<_EmployeesTable> {
             : OutlinedButton(onPressed: () => widget.onReplace(e), child: const Text('Re-register')),
         PopupMenuButton<String>(
           tooltip: 'More',
-          icon: const Icon(Icons.more_vert, color: AppTheme.textSecondary),
+          icon: Icon(Icons.more_vert, color: AppTheme.textSecondary),
           onSelected: (v) => switch (v) {
             'edit' => widget.onEdit(e),
             'add' => widget.onRegister(e),
@@ -710,8 +825,8 @@ class _EmployeesTableState extends State<_EmployeesTable> {
             const PopupMenuItem(value: 'edit', child: ListTile(
                 dense: true, contentPadding: EdgeInsets.zero,
                 leading: Icon(Icons.edit_outlined, size: 20), title: Text('Edit details'))),
-            if (faces > 0) ...const [
-              PopupMenuItem(value: 'add', child: ListTile(
+            if (faces > 0) ...[
+              const PopupMenuItem(value: 'add', child: ListTile(
                   dense: true, contentPadding: EdgeInsets.zero,
                   leading: Icon(Icons.add_a_photo_outlined, size: 20), title: Text('Add more photos'))),
               PopupMenuItem(value: 'delete', child: ListTile(

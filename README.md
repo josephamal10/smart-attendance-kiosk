@@ -33,6 +33,9 @@ and an admin dashboard.
 
 ## Run it
 
+**Quickest (Windows, after setup):** double-click `run.bat`. It starts the server in its own
+window, waits until it's ready, then opens the kiosk app. Close the server window to stop it.
+
 **Backend with Docker** (any OS):
 ```bash
 copy .env.example .env          # then set SECRET_KEY
@@ -47,7 +50,7 @@ pip install -r requirements-dev.txt
 copy .env.example .env          # then set SECRET_KEY
 python scripts/create_admin.py --username admin --name "Admin"
 uvicorn main:app --reload       # API docs at http://127.0.0.1:8000/docs
-pytest                          # 44 tests, no camera needed
+pytest                          # 51 tests, no camera needed
 ```
 
 **App** (Flutter, Windows desktop):

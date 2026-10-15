@@ -7,7 +7,7 @@ from auth import require_admin
 from database import get_db
 from models import Employee
 from schemas import SettingsModel
-from services import audit, email_service, settings_service
+from services import audit, backup, email_service, settings_service
 
 router = APIRouter(prefix="/admin/settings", tags=["Settings"], dependencies=[Depends(require_admin)])
 
@@ -50,3 +50,20 @@ def test_email(db: Session = Depends(get_db), admin: Employee = Depends(require_
     audit.record(db, admin, "email.test", details=result)
     db.commit()
     return {"message": result}
+
+
+@router.get("/backups")
+def list_backups():
+    return {"supported": backup.db_path() is not None, "folder": backup.BACKUP_DIR,
+            "keep": backup.KEEP, "backups": backup.list_backups()}
+
+
+@router.post("/backups")
+def make_backup(db: Session = Depends(get_db), admin: Employee = Depends(require_admin)):
+    try:
+        name = backup.backup_now()
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    audit.record(db, admin, "backup.created", details=name)
+    db.commit()
+    return {"message": f"Backup saved as {name}"}

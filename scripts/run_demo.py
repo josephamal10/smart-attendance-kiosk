@@ -14,7 +14,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(ROOT)
 sys.path.insert(0, ROOT)
 os.environ["DATABASE_URL"] = "sqlite:///./demo.db"
-os.environ["CORS_ORIGINS"] = "http://localhost:5180,http://127.0.0.1:5180"
+os.environ.setdefault("CORS_ORIGINS", "http://localhost:5180,http://127.0.0.1:5180")
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="127.0.0.1", port=8001)

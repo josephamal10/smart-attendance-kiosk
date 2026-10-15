@@ -25,3 +25,4 @@ reports/**/scores.csv
 docker-data/
 models/face/*.onnx
 demo.db
+backups/

@@ -64,4 +64,19 @@ void main() {
         flags: [], whenClean: StatusBadge('On time', tone: Tone.success)))));
     expect(find.text('On time'), findsOneWidget);
   });
+
+  testWidgets("Kiosk result card shows greeting, status and today's summary", (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1366, 768));
+    await tester.pumpWidget(const MaterialApp(home: KioskScreen(demoResult: {
+      'recognized': true, 'name': 'Priya Raman', 'category': 'HR', 'action': 'in',
+      'time': '2026-10-15T09:27:00', 'greeting': 'Good morning, Priya!',
+      'flags': ['late'], 'late_minutes': 12, 'message': 'Have a great day!', 'self_token': 't',
+    })));
+    await tester.pump();
+    expect(find.text('Good morning, Priya!'), findsOneWidget);
+    expect(find.text('Checked in'), findsOneWidget);
+    expect(find.text('Late by 12 min'), findsOneWidget);
+    expect(find.text('My attendance'), findsOneWidget);
+    await tester.binding.setSurfaceSize(null);
+  });
 }

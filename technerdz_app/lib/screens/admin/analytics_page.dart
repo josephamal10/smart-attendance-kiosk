@@ -100,7 +100,8 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
           child: SizedBox(height: 260, child: _dailyChart(daily))),
       const SizedBox(height: AppTheme.gap),
       Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Expanded(flex: 3, child: _chartCard('Average arrival time', 'Across everyone who checked in that day.',
+        Expanded(flex: 3, child: _chartCard('Average arrival time',
+            'Across everyone who checked in that day. Grey line: office start (${_clock(_parseHhmm(d['work_start']))}).',
             child: SizedBox(height: 240, child: _arrivalChart(daily, _parseHhmm(d['work_start']))))),
         const SizedBox(width: AppTheme.gap),
         Expanded(flex: 2, child: _chartCard('Late arrivals by team', 'Total late check-ins in this period.',
@@ -151,13 +152,16 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
 
   Widget _dailyChart(List<Map<String, dynamic>> daily) {
     final maxPresent = daily.fold<int>(0, (m, d) => max(m, d['present'] as int));
+    // Round the top of the axis up to a whole step so the last label isn't squeezed in
+    final step = max(1, (maxPresent / 4).ceil());
+    final top = ((maxPresent + 1) / step).ceil() * step;
     final labelEvery = max(1, (daily.length / 7).ceil());
     final barWidth = min(24.0, max(4.0, 600 / daily.length * 0.6));
     final surface = AppTheme.surface;
 
     return BarChart(BarChartData(
       alignment: BarChartAlignment.spaceAround,
-      maxY: max(4, maxPresent + 1).toDouble(),
+      maxY: max(4, top).toDouble(),
       barGroups: [
         for (var i = 0; i < daily.length; i++)
           () {
@@ -180,7 +184,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
             ]);
           }(),
       ],
-      gridData: FlGridData(drawVerticalLine: false, horizontalInterval: max(1, (maxPresent / 4).ceil()).toDouble(),
+      gridData: FlGridData(drawVerticalLine: false, horizontalInterval: step.toDouble(),
           getDrawingHorizontalLine: (_) => FlLine(color: AppTheme.chartGrid, strokeWidth: 1)),
       borderData: FlBorderData(show: false),
       titlesData: _titles(
@@ -190,7 +194,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
           if (i % labelEvery != 0 || i >= daily.length) return const SizedBox.shrink();
           return Text(DateFormat('d MMM').format(DateTime.parse(daily[i]['date'])), style: _axis);
         },
-        leftInterval: max(1, (maxPresent / 4).ceil()).toDouble(),
+        leftInterval: step.toDouble(),
         left: (v) => Text(v.toInt().toString(), style: _axis),
         leftReserved: 28,
       ),
@@ -250,9 +254,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
       extraLinesData: ExtraLinesData(horizontalLines: [
         HorizontalLine(
           y: startMinutes.toDouble(), color: AppTheme.textMuted, strokeWidth: 1,
-          label: HorizontalLineLabel(show: true, alignment: Alignment.topLeft,
-              style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
-              labelResolver: (_) => 'Office start ${_clock(startMinutes)}'),
+          // Explained in the card subtitle instead of a label that would sit on the data
         ),
       ]),
       gridData: FlGridData(drawVerticalLine: false, horizontalInterval: 15,

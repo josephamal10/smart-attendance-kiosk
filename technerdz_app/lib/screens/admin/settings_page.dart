@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../../services/api_service.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/appearance.dart';
@@ -15,6 +16,8 @@ class _SettingsPageState extends State<SettingsPage> {
   Map<String, dynamic> _edit = {}; // being edited
   bool _saving = false;
   bool _testing = false;
+  bool _backingUp = false;
+  Map<String, dynamic>? _backups;
   String? _error;
   final _company = TextEditingController();
   final _newEmail = TextEditingController();
@@ -34,7 +37,30 @@ class _SettingsPageState extends State<SettingsPage> {
     super.dispose();
   }
 
+  Future<void> _loadBackups() async {
+    try {
+      final b = await ApiService.getBackups();
+      if (mounted) setState(() => _backups = b);
+    } catch (_) {}
+  }
+
+  Future<void> _backupNow() async {
+    setState(() => _backingUp = true);
+    try {
+      final msg = await ApiService.backupNow();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      _loadBackups();
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message), backgroundColor: AppTheme.danger));
+      }
+    } finally {
+      if (mounted) setState(() => _backingUp = false);
+    }
+  }
+
   Future<void> _load() async {
+    _loadBackups();
     try {
       final s = await ApiService.getSettings();
       if (!mounted) return;
@@ -228,6 +254,41 @@ class _SettingsPageState extends State<SettingsPage> {
                   : const Icon(Icons.send_outlined, size: 18),
               label: const Text('Send test'),
             )),
+      ]),
+      const SizedBox(height: AppTheme.gap),
+      _section('Backups', Icons.backup_outlined, [
+        _row('Automatic backups',
+            _backups == null
+                ? 'Loading...'
+                : _backups!['supported'] == true
+                    ? 'A copy of the database is saved once a day. The newest ${_backups!['keep']} are kept in '
+                      'the server\'s "${_backups!['folder']}" folder.'
+                    : 'Only available with the built-in SQLite database. Back up your MySQL server separately.',
+            OutlinedButton.icon(
+              onPressed: _backingUp || _backups?['supported'] != true ? null : _backupNow,
+              icon: _backingUp
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.save_alt, size: 18),
+              label: const Text('Back up now'),
+            )),
+        if (_backups != null && (_backups!['backups'] as List).isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Column(children: [
+              for (final b in (_backups!['backups'] as List).take(5))
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(children: [
+                    Icon(Icons.description_outlined, size: 18, color: AppTheme.textMuted),
+                    const SizedBox(width: 10),
+                    Expanded(child: Text(b['file'], style: AppTheme.body)),
+                    Text('${b['size_kb']} KB', style: AppTheme.muted),
+                    const SizedBox(width: 16),
+                    Text(DateFormat('d MMM, h:mm a').format(DateTime.parse(b['created'])), style: AppTheme.muted),
+                  ]),
+                ),
+            ]),
+          ),
       ]),
       const SizedBox(height: AppTheme.gap),
       _section('General', Icons.tune, [

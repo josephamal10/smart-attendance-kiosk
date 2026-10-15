@@ -5,15 +5,16 @@ import uuid
 from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
 from auth import require_admin
 from database import get_db
-from models import AttendanceLog, Employee, NO_PASSWORD
+from models import AttendanceLog, Employee, FaceImage, LeaveRequest, NO_PASSWORD
 from schemas import (AttendanceCreate, AttendanceEdit, AttendanceOut, CATEGORIES,
                      EmployeeCreate, EmployeeOut, EmployeeUpdate)
-from services import audit, rules as R
+from services import audit, register, rules as R
+from services.settings_service import get as get_setting
 from services.settings_service import parse_hhmm
 
 # Every route in this file needs an admin token
@@ -234,3 +235,42 @@ def export_csv(db: Session = Depends(get_db)):
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=attendance_report.csv"}
     )
+
+
+# ── Monthly register & employee profile ──────────────────────────────────────
+
+def _ym(year: int | None, month: int | None) -> tuple[int, int]:
+    today = date.today()
+    return year or today.year, month or today.month
+
+@router.get("/register")
+def monthly_register(year: int = Query(None, ge=2000, le=2100), month: int = Query(None, ge=1, le=12),
+                     db: Session = Depends(get_db)):
+    return register.build(db, *_ym(year, month))
+
+@router.get("/register.xlsx")
+def monthly_register_xlsx(year: int = Query(None, ge=2000, le=2100), month: int = Query(None, ge=1, le=12),
+                          db: Session = Depends(get_db)):
+    y, m = _ym(year, month)
+    data = register.build(db, y, m)
+    content = register.to_xlsx(data, get_setting(db, "company_name"))
+    return Response(content, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f"attachment; filename=attendance-{y}-{m:02d}.xlsx"})
+
+@router.get("/employees/{employee_id}/profile")
+def employee_profile(employee_id: int, year: int = Query(None, ge=2000, le=2100),
+                     month: int = Query(None, ge=1, le=12), db: Session = Depends(get_db)):
+    emp = db.get(Employee, employee_id)
+    if not emp or emp.role != "user":
+        raise HTTPException(status_code=404, detail="Employee not found")
+    data = register.build(db, *_ym(year, month), employee_ids=[employee_id])
+    leave = (db.query(LeaveRequest).filter(LeaveRequest.employee_id == employee_id)
+               .order_by(LeaveRequest.start_date.desc()).limit(10).all())
+    return {
+        "employee": EmployeeOut.model_validate(emp).model_dump(mode="json"),
+        "face_photos": db.query(FaceImage).filter(FaceImage.employee_id == employee_id).count(),
+        "month": {k: data[k] for k in ("year", "month", "month_name", "work_start", "work_end", "days")},
+        "row": data["rows"][0] if data["rows"] else None,
+        "leave": [{"id": l.id, "start_date": l.start_date.isoformat(), "end_date": l.end_date.isoformat(),
+                   "kind": l.kind, "status": l.status, "reason": l.reason} for l in leave],
+    }

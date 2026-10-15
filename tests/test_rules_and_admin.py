@@ -50,6 +50,13 @@ def test_early_leave_and_half_day():
     assert ev.early_minutes == 330 and ev.worked_minutes == 210
 
 
+def test_leaving_within_grace_is_not_early():
+    ev = R.evaluate(_mk("2026-10-12", "09:00", "17:50"), _rules())
+    assert "early_leave" not in ev.flags
+    ev = R.evaluate(_mk("2026-10-12", "09:00", "17:40"), _rules())
+    assert "early_leave" in ev.flags and ev.early_minutes == 20
+
+
 def test_full_day_has_no_flags():
     ev = R.evaluate(_mk("2026-10-12", "08:55", "18:05"), _rules())
     assert ev.flags == [] and ev.worked_minutes == 550

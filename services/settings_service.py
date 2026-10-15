@@ -22,10 +22,11 @@ DEFAULTS: dict[str, Any] = {
     "email_enabled":        False,
     "email_time":           "19:00",
     "last_email_date":      "",       # internal: stops the summary going out twice a day
+    "last_backup_date":     "",       # internal: one automatic backup per day
 }
 
-# Keys the dashboard may edit (last_email_date is internal bookkeeping)
-EDITABLE = [k for k in DEFAULTS if k != "last_email_date"]
+# Keys the dashboard may edit (the last_* keys are internal bookkeeping)
+EDITABLE = [k for k in DEFAULTS if not k.startswith("last_")]
 
 
 def get_all(db: Session) -> dict[str, Any]:

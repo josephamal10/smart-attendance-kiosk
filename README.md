@@ -6,6 +6,20 @@ A desktop kiosk where employees check in and out by looking at a camera.
 anti-spoofing CNN served with ONNX Runtime** ([ml/antispoof](ml/antispoof/README.md))
 and an admin dashboard.
 
+
+| Walk-up kiosk | Admin overview |
+|---|---|
+| ![Kiosk check-in](docs/screenshots/kiosk.png) | ![Overview](docs/screenshots/overview.png) |
+| **Monthly register** (exports to Excel) | **Employee profile** |
+| ![Monthly register](docs/screenshots/register.png) | ![Employee profile](docs/screenshots/profile.png) |
+| **Analytics** | **Dark mode** |
+| ![Analytics](docs/screenshots/analytics.png) | ![Analytics, dark](docs/screenshots/analytics-dark.png) |
+| **My attendance** (employee, opened by face) | **Requests** |
+| ![My attendance](docs/screenshots/my-attendance.png) | ![Requests](docs/screenshots/requests.png) |
+
+<sub>Screenshots use made-up demo data (`scripts/seed_demo.py`) and are regenerated with
+`python scripts/screenshots.py`.</sub>
+
 ```
  Flutter kiosk                         FastAPI server
  ┌───────────────┐   password login    ┌──────────────────────────────┐
@@ -46,10 +60,14 @@ password, any password you like, changeable in the dashboard; signs out after 5 
 | Closes itself after a minute idle | Holidays calendar (excluded from absences) |
 | | Analytics: daily on-time vs late, arrival trend, late by team, punctuality |
 | | Audit log of every admin and system action |
-| | Settings: office hours, grace period, half day, days off, HR email, dark mode |
+| | Monthly register (P/L/A/LV/H grid) with **Excel export** and per-employee profiles |
+| | Settings: office hours, grace period, half day, days off, HR email, backups, dark mode |
 
-Automatic jobs: forgotten check-outs are closed at office end time (flagged), and HR gets a
-daily summary email (Gmail SMTP; saved to `reports/emails/` until SMTP is configured).
+Automatic jobs: forgotten check-outs are closed at office end time (flagged), HR gets a daily
+summary email (Gmail SMTP; saved to `reports/emails/` until SMTP is configured), and the
+database is backed up daily (14 copies kept in `backups/`). The dashboard refreshes itself every 30 s.
+
+CI: GitHub Actions runs the backend tests and Flutter analyze/tests on every push.
 
 ## Run it
 
@@ -70,7 +88,7 @@ pip install -r requirements-dev.txt
 copy .env.example .env          # then set SECRET_KEY
 python scripts/create_admin.py --username admin --name "Admin"
 uvicorn main:app --reload       # API docs at http://127.0.0.1:8000/docs
-pytest                          # 84 tests, no camera needed
+pytest                          # 92 tests, no camera needed
 ```
 
 **App** (Flutter, Windows desktop):

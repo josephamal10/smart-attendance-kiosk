@@ -16,7 +16,9 @@ import 'my_attendance_screen.dart';
 /// the server recognises them and records IN / OUT. No names, no passwords.
 /// A small icon in the corner leads admins to their sign-in.
 class KioskScreen extends StatefulWidget {
-  const KioskScreen({super.key});
+  /// Shows this check-in result without a camera (widget tests and the screenshot tool).
+  final Map<String, dynamic>? demoResult;
+  const KioskScreen({super.key, this.demoResult});
   @override
   State<KioskScreen> createState() => _KioskScreenState();
 }
@@ -48,6 +50,12 @@ class _KioskScreenState extends State<KioskScreen> {
   @override
   void initState() {
     super.initState();
+    if (widget.demoResult != null) {
+      _phase = _Phase.result;
+      _result = widget.demoResult;
+      _resultCountdown = _resultSeconds;
+      return;
+    }
     _startCamera();
   }
 
@@ -372,7 +380,7 @@ class _KioskScreenState extends State<KioskScreen> {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: BoxDecoration(color: c.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(12)),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
+          child: FittedBox(fit: BoxFit.scaleDown, child: Row(mainAxisSize: MainAxisSize.min, children: [
             Icon(icon, color: c, size: 22),
             const SizedBox(width: 10),
             Text(label, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: c)),
@@ -380,7 +388,7 @@ class _KioskScreenState extends State<KioskScreen> {
             Text(DateFormat('h:mm a').format(time), style: TextStyle(
                 fontSize: 18, fontWeight: FontWeight.w600, color: AppTheme.textPrimary,
                 fontFeatures: AppTheme.tabular)),
-          ]),
+          ])),
         ),
         const SizedBox(height: 12),
         Row(mainAxisSize: MainAxisSize.min, children: [

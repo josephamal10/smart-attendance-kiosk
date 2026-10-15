@@ -385,4 +385,37 @@ class ApiService {
       'date': ymd(date), 'kind': kind, 'note': note,
     })));
   }
+
+  // ── Monthly register & profiles ──────────────────────
+  static Future<Map<String, dynamic>> getRegister(int year, int month) async {
+    return Map<String, dynamic>.from(_handle(await http.get(
+        _uri('/admin/register', {'year': '$year', 'month': '$month'}), headers: _headers)));
+  }
+
+  /// Saves the coloured Excel register to the Downloads folder and returns its path.
+  static Future<String> downloadRegisterXlsx(int year, int month) async {
+    final res = await http.get(
+        _uri('/admin/register.xlsx', {'year': '$year', 'month': '$month'}), headers: _headers);
+    _handle(res);
+    final home = Platform.environment['USERPROFILE'] ?? Platform.environment['HOME'] ?? '.';
+    final dir = Directory('$home${Platform.pathSeparator}Downloads');
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+    final file = File('${dir.path}${Platform.pathSeparator}attendance-$year-${month.toString().padLeft(2, '0')}.xlsx');
+    await file.writeAsBytes(res.bodyBytes);
+    return file.path;
+  }
+
+  static Future<Map<String, dynamic>> getProfile(int employeeId, int year, int month) async {
+    return Map<String, dynamic>.from(_handle(await http.get(
+        _uri('/admin/employees/$employeeId/profile', {'year': '$year', 'month': '$month'}), headers: _headers)));
+  }
+
+  // ── Backups ──────────────────────────────────────────
+  static Future<Map<String, dynamic>> getBackups() async {
+    return Map<String, dynamic>.from(_handle(await http.get(_uri('/admin/settings/backups'), headers: _headers)));
+  }
+
+  static Future<String> backupNow() async {
+    return _handle(await http.post(_uri('/admin/settings/backups'), headers: _headers))['message'] as String;
+  }
 }

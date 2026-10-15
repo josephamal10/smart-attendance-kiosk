@@ -60,7 +60,7 @@ def evaluate(log: AttendanceLog, rules: Rules) -> Evaluation:
         end = datetime.combine(day, rules.end)
         if log.auto_checkout:
             ev.flags.append("missed_checkout")
-        elif log.out_time < end:
+        elif log.out_time < end - rules.grace:  # same grace as arrivals: 5:57 PM isn't "early"
             ev.flags.append("early_leave")
             ev.early_minutes = int((end - log.out_time).total_seconds() // 60)
         if not log.auto_checkout and worked < rules.half_day:

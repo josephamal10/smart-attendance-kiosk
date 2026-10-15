@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../theme/app_theme.dart';
@@ -12,6 +13,8 @@ import 'admin/audit_page.dart';
 import 'admin/holidays_page.dart';
 import 'admin/requests_page.dart';
 import 'admin/settings_page.dart';
+import 'admin/register_view.dart';
+import 'admin/employee_profile.dart';
 import '../theme/appearance.dart';
 
 enum _Page { overview, attendance, employees, requests, holidays, analytics, audit, settings }
@@ -51,13 +54,21 @@ const _navGroups = [
 const _noTeam = 'No team';
 
 class AdminDashboard extends StatefulWidget {
-  const AdminDashboard({super.key});
+  /// Optional deep link, e.g. 'analytics' or 'attendance:register' (used by the screenshot tool)
+  final String? initialPage;
+  final int? initialProfileId;
+  const AdminDashboard({super.key, this.initialPage, this.initialProfileId});
   @override
   State<AdminDashboard> createState() => _AdminDashboardState();
 }
 
 class _AdminDashboardState extends State<AdminDashboard> {
   _Page _page = _Page.overview;
+  int? _profileId;                 // set when looking at one employee's profile
+  String _attendanceView = 'daily'; // daily log or monthly register
+  Timer? _live;                    // quiet auto-refresh so new check-ins appear by themselves
+  DateTime? _updatedAt;
+  int _profileRev = 0;             // bumped after edits so an open profile reloads
   bool _loading = true;
 
   List<AttendanceLog> _todayLogs = [];
@@ -76,11 +87,33 @@ class _AdminDashboardState extends State<AdminDashboard> {
   @override
   void initState() {
     super.initState();
+    final link = widget.initialPage?.split(':');
+    if (link != null) {
+      _page = _Page.values.where((p) => p.name == link.first).firstOrNull ?? _Page.overview;
+      if (link.length > 1) _attendanceView = link[1];
+    }
+    if (widget.initialProfileId != null) {
+      _page = _Page.employees;
+      _profileId = widget.initialProfileId;
+    }
     _loadData();
+    _live = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted && !_loading) _loadData(silent: true);
+    });
   }
 
-  Future<void> _loadData() async {
-    setState(() => _loading = true);
+  @override
+  void dispose() {
+    _live?.cancel();
+    super.dispose();
+  }
+
+  void _go(_Page p) => setState(() { _page = p; _profileId = null; });
+
+  void _openProfile(int employeeId) => setState(() { _page = _Page.employees; _profileId = employeeId; });
+
+  Future<void> _loadData({bool silent = false}) async {
+    if (!silent) setState(() => _loading = true);
     try {
       final results = await Future.wait([
         ApiService.getTodayAll(),
@@ -99,6 +132,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
       final counts = await Future.wait(emps.map((e) => ApiService.getFaceCount(e.id)));
       if (!mounted) return;
       setState(() {
+        _updatedAt = DateTime.now();
         if (results.length > 7) _categories = results[7] as List<String>;
         _pending = results[4].length + results[5].length;
         final today = DateTime.now();
@@ -122,9 +156,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
           ..addAll({for (final r in results[3]) r['employee_id'] as int: Map<String, dynamic>.from(r)});
       });
     } catch (e) {
-      if (mounted) _toast('Could not load data: $e', error: true);
+      // A failed background refresh stays quiet; the next one will try again
+      if (mounted && !silent) _toast('Could not load data: $e', error: true);
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && !silent) setState(() => _loading = false);
     }
   }
 
@@ -168,6 +203,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         context: context, builder: (_) => _EmployeeDialog(categories: _categories, employee: emp));
     if (saved != null && mounted) {
       _toast('Saved changes for ${saved.name}.');
+      setState(() => _profileRev++);
       _loadData();
     }
   }
@@ -214,6 +250,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     if (!mounted) return;
     await Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => FaceRegisterScreen(employeeId: emp.id, employeeName: emp.name)));
+    if (mounted) setState(() => _profileRev++);
     _loadData();
   }
 
@@ -300,7 +337,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
                           child: switch (_page) {
                             _Page.overview   => _overview(),
                             _Page.attendance => _attendance(),
-                            _Page.employees  => _employeesPage(),
+                            _Page.employees  => _profileId == null
+                                ? _employeesPage()
+                                : EmployeeProfileView(
+                                    key: ValueKey(_profileId),
+                                    employeeId: _profileId!,
+                                    revision: _profileRev,
+                                    onBack: () => setState(() => _profileId = null),
+                                    onEdit: _editEmployee,
+                                    onRegisterFace: (e, {bool replace = false}) => _registerFace(e, replace: replace),
+                                  ),
                             _Page.requests   => RequestsPage(employees: _employees, onChanged: _loadData),
                             _Page.holidays   => HolidaysPage(onChanged: _loadData),
                             _Page.analytics  => const AnalyticsPage(),
@@ -345,7 +391,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   label: p.navLabel,
                   selected: _page == p,
                   badge: p == _Page.requests && _pending > 0 ? _pending : null,
-                  onTap: () => setState(() => _page = p),
+                  onTap: () => _go(p),
                 ),
             ],
           ]),
@@ -402,12 +448,24 @@ class _AdminDashboardState extends State<AdminDashboard> {
       child: Row(children: [
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(_page.title, style: AppTheme.h1),
+            Text(_profileId != null && _page == _Page.employees ? 'Employee profile' : _page.title,
+                style: AppTheme.h1),
             const SizedBox(height: 4),
             Row(children: [
               Text(DateFormat('EEEE, d MMMM y').format(DateTime.now()), style: AppTheme.muted),
               Text('  ·  ', style: AppTheme.muted),
               const ClockWidget(large: false),
+              if (_updatedAt != null) ...[
+                const SizedBox(width: 14),
+                Tooltip(
+                  message: 'Refreshes automatically every 30 seconds',
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Container(width: 7, height: 7, decoration: BoxDecoration(color: AppTheme.success, shape: BoxShape.circle)),
+                    const SizedBox(width: 6),
+                    Text('Live · updated ${DateFormat('h:mm:ss a').format(_updatedAt!)}', style: AppTheme.muted),
+                  ]),
+                ),
+              ],
             ]),
           ]),
         ),
@@ -612,7 +670,24 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   // ── Attendance records ───────────────────────────────────
 
-  Widget _attendance() {
+  Widget _attendance() => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Align(
+          alignment: Alignment.centerLeft,
+          child: SegmentedButton<String>(
+            segments: const [
+              ButtonSegment(value: 'daily', label: Text('Daily log'), icon: Icon(Icons.view_list_outlined)),
+              ButtonSegment(value: 'register', label: Text('Monthly register'), icon: Icon(Icons.grid_on_outlined)),
+            ],
+            selected: {_attendanceView},
+            showSelectedIcon: false,
+            onSelectionChanged: (s) => setState(() => _attendanceView = s.first),
+          ),
+        ),
+        const SizedBox(height: AppTheme.gap),
+        _attendanceView == 'register' ? RegisterView(onOpenEmployee: _openProfile) : _dailyLog(),
+      ]);
+
+  Widget _dailyLog() {
     final fmt = DateFormat('d MMM y');
     final rangeText = _range == null
         ? 'All dates'
@@ -656,6 +731,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         onReplace: (e) => _registerFace(e, replace: true),
         onDelete: _deleteFaces,
         onEdit: _editEmployee,
+        onOpen: (e) => _openProfile(e.id),
       );
 }
 
@@ -708,11 +784,11 @@ class _EmployeesTable extends StatefulWidget {
   final Map<int, Map<String, dynamic>> monthStats;
   final Widget Function(String, String, {Widget? trailing}) header;
   final Widget Function(String?, ValueChanged<String?>) teamChips;
-  final void Function(Employee) onRegister, onReplace, onDelete, onEdit;
+  final void Function(Employee) onRegister, onReplace, onDelete, onEdit, onOpen;
   const _EmployeesTable({
     required this.employees, required this.faceCounts, required this.monthStats,
     required this.header, required this.teamChips, required this.onRegister,
-    required this.onReplace, required this.onDelete, required this.onEdit,
+    required this.onReplace, required this.onDelete, required this.onEdit, required this.onOpen,
   });
 
   @override
@@ -776,7 +852,14 @@ class _EmployeesTableState extends State<_EmployeesTable> {
     final tone = pct == null ? Tone.neutral : pct >= 75 ? Tone.success : pct >= 50 ? Tone.warning : Tone.danger;
 
     return [
-      PersonCell(e.name, secondary: e.isActive ? null : 'Disabled — cannot check in'),
+      InkWell(
+        onTap: () => widget.onOpen(e),
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: PersonCell(e.name, secondary: e.isActive ? 'View profile' : 'Disabled — cannot check in'),
+        ),
+      ),
       e.category == null
           ? const StatusBadge('Not set', tone: Tone.warning)
           : StatusBadge(e.category!, tone: Tone.neutral, dot: false),
@@ -817,11 +900,15 @@ class _EmployeesTableState extends State<_EmployeesTable> {
           tooltip: 'More',
           icon: Icon(Icons.more_vert, color: AppTheme.textSecondary),
           onSelected: (v) => switch (v) {
+            'profile' => widget.onOpen(e),
             'edit' => widget.onEdit(e),
             'add' => widget.onRegister(e),
             _ => widget.onDelete(e),
           },
           itemBuilder: (_) => [
+            const PopupMenuItem(value: 'profile', child: ListTile(
+                dense: true, contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.badge_outlined, size: 20), title: Text('View profile'))),
             const PopupMenuItem(value: 'edit', child: ListTile(
                 dense: true, contentPadding: EdgeInsets.zero,
                 leading: Icon(Icons.edit_outlined, size: 20), title: Text('Edit details'))),

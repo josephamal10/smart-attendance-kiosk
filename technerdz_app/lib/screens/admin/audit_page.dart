@@ -35,6 +35,7 @@ class _AuditPageState extends State<AuditPage> {
     'settings.updated': ('Settings changed', Icons.tune, Tone.primary),
     'email.daily_summary': ('Daily email', Icons.mail_outline, Tone.neutral),
     'email.test': ('Test email', Icons.mail_outline, Tone.neutral),
+    'backup.created': ('Backup made', Icons.backup_outlined, Tone.neutral),
   };
 
   @override

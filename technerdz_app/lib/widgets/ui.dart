@@ -352,3 +352,42 @@ class FlagBadges extends StatelessWidget {
     ]);
   }
 }
+
+/// How each day in the register / profile calendar is shown: colour + short code + label.
+/// Codes and labels make sure status is never shown by colour alone.
+class DayStatus {
+  static (Color bg, Color fg, String code, String label) of(String status) => switch (status) {
+        'present'  => (AppTheme.successSoft, AppTheme.success, 'P', 'Present'),
+        'late'     => (AppTheme.warningSoft, AppTheme.warning, 'L', 'Late'),
+        'half_day' => (AppTheme.dangerSoft, AppTheme.danger, '½', 'Half day'),
+        'absent'   => (AppTheme.dangerSoft, AppTheme.danger, 'A', 'Absent'),
+        'leave'    => (AppTheme.primarySoft, AppTheme.primary, 'LV', 'Leave'),
+        'holiday'  => (AppTheme.neutralSoft, AppTheme.textSecondary, 'H', 'Holiday'),
+        'off'      => (AppTheme.surfaceMuted, AppTheme.textMuted, '', 'Day off'),
+        _          => (Colors.transparent, AppTheme.textMuted, '', 'Upcoming'),
+      };
+
+  static const legendOrder = ['present', 'late', 'half_day', 'absent', 'leave', 'holiday', 'off'];
+}
+
+class DayLegend extends StatelessWidget {
+  const DayLegend({super.key});
+
+  @override
+  Widget build(BuildContext context) => Wrap(spacing: 14, runSpacing: 6, children: [
+        for (final s in DayStatus.legendOrder)
+          Builder(builder: (_) {
+            final (bg, fg, code, label) = DayStatus.of(s);
+            return Row(mainAxisSize: MainAxisSize.min, children: [
+              Container(
+                width: 22, height: 18, alignment: Alignment.center,
+                decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: fg.withValues(alpha: 0.25))),
+                child: Text(code, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: fg)),
+              ),
+              const SizedBox(width: 6),
+              Text(label, style: AppTheme.muted),
+            ]);
+          }),
+      ]);
+}

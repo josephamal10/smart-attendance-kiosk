@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from database import SessionLocal
 from models import AttendanceLog
-from services import audit, email_service, settings_service
+from services import audit, backup, email_service, settings_service
 from services.rules import Rules
 
 log = logging.getLogger("technerdz.scheduler")
@@ -53,6 +53,17 @@ def maybe_send_daily_email(db: Session, now: datetime | None = None) -> str | No
     return result
 
 
+def maybe_backup(db: Session, now: datetime | None = None) -> str | None:
+    """One automatic database backup per day (SQLite only)."""
+    now = now or datetime.now()
+    if not backup.db_path() or settings_service.get(db, "last_backup_date") == now.date().isoformat():
+        return None
+    name = backup.backup_now()
+    settings_service.put(db, "last_backup_date", now.date().isoformat())
+    db.commit()
+    return name
+
+
 def run_jobs() -> None:
     db = SessionLocal()
     try:
@@ -62,6 +73,9 @@ def run_jobs() -> None:
         sent = maybe_send_daily_email(db)
         if sent:
             log.info("daily summary: %s", sent)
+        saved = maybe_backup(db)
+        if saved:
+            log.info("database backed up to %s", saved)
     except Exception:  # keep the loop alive; the next run retries
         log.exception("background job failed")
         db.rollback()

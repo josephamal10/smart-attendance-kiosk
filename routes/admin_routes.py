@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
-from auth import require_admin
+from auth import require_admin, require_super
 from database import get_db
 from models import AttendanceLog, Employee, FaceImage, LeaveRequest, NO_PASSWORD
 from schemas import (AttendanceCreate, AttendanceEdit, AttendanceOut, CATEGORIES,
@@ -28,7 +28,7 @@ def to_out(log: AttendanceLog, rules: R.Rules) -> AttendanceOut:
         in_time=log.in_time, out_time=log.out_time, status=log.status,
         auto_checkout=bool(log.auto_checkout), flags=ev.flags,
         late_minutes=ev.late_minutes, early_minutes=ev.early_minutes,
-        worked_minutes=ev.worked_minutes,
+        worked_minutes=ev.worked_minutes, overtime_minutes=ev.overtime_minutes,
     )
 
 
@@ -65,7 +65,7 @@ def all_attendance(
 
 @router.patch("/attendance/{log_id}", response_model=AttendanceOut)
 def correct_attendance(log_id: int, data: AttendanceEdit, db: Session = Depends(get_db),
-                       admin: Employee = Depends(require_admin)):
+                       admin: Employee = Depends(require_super)):
     """Fix a record's times. A reason is required and the change is audit-logged."""
     log = db.get(AttendanceLog, log_id)
     if not log:
@@ -88,7 +88,7 @@ def correct_attendance(log_id: int, data: AttendanceEdit, db: Session = Depends(
 
 @router.post("/attendance", response_model=AttendanceOut)
 def add_attendance(data: AttendanceCreate, db: Session = Depends(get_db),
-                   admin: Employee = Depends(require_admin)):
+                   admin: Employee = Depends(require_super)):
     """Add a day that was never recorded (e.g. the kiosk was down)."""
     if not db.get(Employee, data.employee_id):
         raise HTTPException(status_code=404, detail="Employee not found")
@@ -125,7 +125,7 @@ def all_employees(db: Session = Depends(get_db)):
 
 @router.post("/employees", response_model=EmployeeOut)
 def create_employee(data: EmployeeCreate, db: Session = Depends(get_db),
-                    admin: Employee = Depends(require_admin)):
+                    admin: Employee = Depends(require_super)):
     """Employees get no password. The username column must be unique, so it's an internal id."""
     emp = Employee(name=data.name.strip(), category=data.category, role="user",
                    username=f"emp-{uuid.uuid4().hex[:10]}", password=NO_PASSWORD)
@@ -138,7 +138,7 @@ def create_employee(data: EmployeeCreate, db: Session = Depends(get_db),
 
 @router.patch("/employees/{employee_id}", response_model=EmployeeOut)
 def update_employee(employee_id: int, data: EmployeeUpdate, db: Session = Depends(get_db),
-                    admin: Employee = Depends(require_admin)):
+                    admin: Employee = Depends(require_super)):
     emp = db.get(Employee, employee_id)
     if not emp or emp.role != "user":
         raise HTTPException(status_code=404, detail="Employee not found")

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../services/api_service.dart';
@@ -42,9 +43,9 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
       if (!mounted) return;
       _passCtrl.clear();
       await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminDashboard()));
-      // Dashboard closed (signed out) → back to the kiosk
+      // Dashboard closed (signed out) → back to the kiosk (in a browser, stay here)
       ApiService.clearSession();
-      if (mounted) Navigator.of(context).pop();
+      if (mounted && !kIsWeb) Navigator.of(context).pop();
     } on ApiException catch (e) {
       // Wrong password / attempts left / locked out — the server explains which
       setState(() => _error = e.message);
@@ -79,16 +80,18 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
 
   Widget _form() {
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Align(
-        alignment: Alignment.centerLeft,
-        child: TextButton.icon(
-          onPressed: () => Navigator.of(context).pop(),
-          icon: const Icon(Icons.arrow_back, size: 18),
-          label: const Text('Back to kiosk'),
-          style: TextButton.styleFrom(foregroundColor: AppTheme.textSecondary, padding: EdgeInsets.zero),
+      if (!kIsWeb) ...[
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () => Navigator.of(context).pop(),
+            icon: const Icon(Icons.arrow_back, size: 18),
+            label: const Text('Back to kiosk'),
+            style: TextButton.styleFrom(foregroundColor: AppTheme.textSecondary, padding: EdgeInsets.zero),
+          ),
         ),
-      ),
-      const SizedBox(height: 24),
+        const SizedBox(height: 24),
+      ],
       Align(
         alignment: Alignment.centerLeft,
         child: Container(

@@ -122,3 +122,16 @@ class AuditLog(Base):
     employee_id = Column(Integer, ForeignKey("employees.id"), nullable=True)
     details = Column(Text, default="")
     reason = Column(Text, default="")
+
+
+class Notice(Base):
+    """A company announcement shown on the kiosk and in everyone's dashboard."""
+    __tablename__ = "notices"
+
+    id = Column(Integer, primary_key=True)
+    title = Column(String(120), nullable=False)
+    body = Column(Text, default="")
+    pinned = Column(Boolean, default=False, nullable=False)
+    expires_on = Column(Date, nullable=True)          # last day it's shown; null = until removed
+    created_at = Column(DateTime, default=datetime.now, nullable=False)  # local time
+    created_by = Column(String(100), nullable=False)

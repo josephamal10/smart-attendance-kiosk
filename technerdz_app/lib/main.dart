@@ -6,10 +6,15 @@ import 'package:camera_windows/camera_windows.dart';
 import 'services/api_service.dart';
 import 'theme/app_theme.dart';
 import 'theme/appearance.dart';
+import 'screens/admin_login_screen.dart';
 import 'screens/kiosk_screen.dart';
 
 // Global navigator key — used by ApiService for session expiry redirect
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
+/// Where the app starts and returns to: the face kiosk on the kiosk PC, admin sign-in in a
+/// browser (the web build is the admin dashboard for HR's own computers — no camera there).
+Widget homeScreen() => kIsWeb ? const AdminLoginScreen() : const KioskScreen();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -57,7 +62,7 @@ class _TechnerdzAppState extends State<TechnerdzApp> {
       // Wrap the Navigator itself so taps on *every* screen reset the idle timer
       // (wrapping only `home` missed every screen pushed on top of it).
       builder: (context, child) => IdleDetector(child: child!),
-      home: const KioskScreen(),
+      home: homeScreen(),
     );
   }
 }
@@ -73,8 +78,8 @@ class IdleDetector extends StatefulWidget {
 class _IdleDetectorState extends State<IdleDetector> {
   Timer? _timer;
   // The kiosk is a shared machine: if an admin walks away from the dashboard,
-  // sign them out and go back to the check-in screen.
-  static const _timeout = Duration(minutes: 5);
+  // sign them out and go back to the check-in screen. A personal browser can wait longer.
+  static const _timeout = kIsWeb ? Duration(minutes: 30) : Duration(minutes: 5);
 
   @override
   void initState() {
@@ -97,7 +102,7 @@ class _IdleDetectorState extends State<IdleDetector> {
     if (ApiService.isLoggedIn) {
       ApiService.clearSession();
       navigatorKey.currentState?.pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const KioskScreen()),
+        MaterialPageRoute(builder: (_) => homeScreen()),
         (_) => false,
       );
     }

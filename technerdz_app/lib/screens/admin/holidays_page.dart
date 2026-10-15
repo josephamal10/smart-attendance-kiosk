@@ -66,7 +66,8 @@ class _HolidaysPageState extends State<HolidaysPage> {
         const SizedBox(width: 12),
         if (_loading) const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
         const Spacer(),
-        ElevatedButton.icon(onPressed: _add, icon: const Icon(Icons.add, size: 18), label: const Text('Add holiday')),
+        if (ApiService.canEdit)
+          ElevatedButton.icon(onPressed: _add, icon: const Icon(Icons.add, size: 18), label: const Text('Add holiday')),
       ]),
       const SizedBox(height: 16),
       if (upcoming.isNotEmpty && _year == today.year) ...[
@@ -92,8 +93,10 @@ class _HolidaysPageState extends State<HolidaysPage> {
                   const StatusBadge('Past', tone: Tone.neutral, dot: false),
                 ],
               ]),
-              IconButton(tooltip: 'Remove', onPressed: () => _delete(h),
-                  icon: Icon(Icons.delete_outline, color: AppTheme.danger, size: 20)),
+              ApiService.canEdit
+                  ? IconButton(tooltip: 'Remove', onPressed: () => _delete(h),
+                      icon: Icon(Icons.delete_outline, color: AppTheme.danger, size: 20))
+                  : const SizedBox.shrink(),
             ],
         ],
       ),

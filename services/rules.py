@@ -16,11 +16,13 @@ from services.settings_service import get_all, parse_hhmm
 
 @dataclass
 class Rules:
-    start: time
+    start: time                 # default office hours...
     end: time
     grace: timedelta
     half_day: timedelta
     weekend: set[int]
+    # ...unless a team has its own shift: {"Developer": (10:00, 19:00)}
+    shifts: dict[str, tuple[time, time]] = field(default_factory=dict)
 
     @classmethod
     def load(cls, db: Session) -> "Rules":
@@ -31,7 +33,12 @@ class Rules:
             grace=timedelta(minutes=int(s["grace_minutes"])),
             half_day=timedelta(hours=float(s["half_day_hours"])),
             weekend=set(s["weekend_days"]),
+            shifts={team: (parse_hhmm(v["start"]), parse_hhmm(v["end"]))
+                    for team, v in (s.get("team_shifts") or {}).items()},
         )
+
+    def shift_for(self, team: str | None) -> tuple[time, time]:
+        return self.shifts.get(team or "", (self.start, self.end))
 
 
 @dataclass
@@ -40,16 +47,21 @@ class Evaluation:
     late_minutes: int = 0
     early_minutes: int = 0
     worked_minutes: int | None = None
+    overtime_minutes: int = 0
 
 
-def evaluate(log: AttendanceLog, rules: Rules) -> Evaluation:
+def evaluate(log: AttendanceLog, rules: Rules, team: str | None = None) -> Evaluation:
+    """Judge one record against the shift of the person's team (or the default hours)."""
     ev = Evaluation()
     if log.in_time is None:
         return ev
     day = log.in_time.date()
+    if team is None and log.employee is not None:
+        team = log.employee.category
+    shift_start, shift_end = rules.shift_for(team)
 
     # Late: after start + grace. Minutes late are counted from the start time itself.
-    start = datetime.combine(day, rules.start)
+    start = datetime.combine(day, shift_start)
     if log.in_time > start + rules.grace:
         ev.flags.append("late")
         ev.late_minutes = int((log.in_time - start).total_seconds() // 60)
@@ -57,7 +69,7 @@ def evaluate(log: AttendanceLog, rules: Rules) -> Evaluation:
     if log.out_time is not None:
         worked = log.out_time - log.in_time
         ev.worked_minutes = max(0, int(worked.total_seconds() // 60))
-        end = datetime.combine(day, rules.end)
+        end = datetime.combine(day, shift_end)
         if log.auto_checkout:
             ev.flags.append("missed_checkout")
         elif log.out_time < end - rules.grace:  # same grace as arrivals: 5:57 PM isn't "early"
@@ -65,6 +77,11 @@ def evaluate(log: AttendanceLog, rules: Rules) -> Evaluation:
             ev.early_minutes = int((end - log.out_time).total_seconds() // 60)
         if not log.auto_checkout and worked < rules.half_day:
             ev.flags.append("half_day")
+        # Overtime: time beyond a full shift's length (ignoring anything within the grace period)
+        if not log.auto_checkout:
+            extra = worked - (datetime.combine(day, shift_end) - datetime.combine(day, shift_start))
+            if extra > rules.grace:
+                ev.overtime_minutes = int(extra.total_seconds() // 60)
     return ev
 
 

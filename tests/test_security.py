@@ -19,6 +19,17 @@ def test_admin_routes_need_login(client, path):
     assert client.get(path).status_code == 401
 
 
+def test_account_without_a_real_hash_fails_cleanly(client, make_employee, db_session):
+    """An admin-role account holding the employee placeholder must give 401, not a server error."""
+    from models import Employee, NO_PASSWORD
+    make_employee("ghost", role="admin")
+    db = db_session()
+    db.query(Employee).filter(Employee.username == "ghost").update({"password": NO_PASSWORD})
+    db.commit()
+    db.close()
+    assert client.post("/auth/login", json={"username": "ghost", "password": "!"}).status_code == 401
+
+
 def test_employees_cannot_sign_in(client, make_employee):
     """Employees have no password at all — even the old default can't get a token."""
     make_employee("amal")

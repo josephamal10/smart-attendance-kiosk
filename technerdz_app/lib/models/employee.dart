@@ -35,6 +35,7 @@ class AttendanceLog {
   final int lateMinutes;
   final int earlyMinutes;
   final int? workedMinutes;
+  final int overtimeMinutes;
 
   AttendanceLog({
     required this.id,
@@ -48,6 +49,7 @@ class AttendanceLog {
     this.lateMinutes = 0,
     this.earlyMinutes = 0,
     this.workedMinutes,
+    this.overtimeMinutes = 0,
   });
 
   bool get isLate => flags.contains('late');
@@ -64,6 +66,7 @@ class AttendanceLog {
     lateMinutes:   j['late_minutes'] ?? 0,
     earlyMinutes:  j['early_minutes'] ?? 0,
     workedMinutes: j['worked_minutes'],
+    overtimeMinutes: j['overtime_minutes'] ?? 0,
   );
 }
 

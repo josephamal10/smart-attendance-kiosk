@@ -156,7 +156,7 @@ class _RegisterViewState extends State<RegisterView> {
             ]),
           ),
         const SizedBox(width: 12),
-        totalHead('P'), totalHead('LATE'), totalHead('ABS'), totalHead('LEAVE'), totalHead('%'),
+        totalHead('P'), totalHead('LATE'), totalHead('ABS'), totalHead('LEAVE'), totalHead('OT h'), totalHead('%'),
       ]),
       const SizedBox(height: 6),
       for (final r in rows)
@@ -173,6 +173,8 @@ class _RegisterViewState extends State<RegisterView> {
               total('${r['totals']['late']}', color: (r['totals']['late'] as int) > 0 ? AppTheme.warning : null),
               total('${r['totals']['absent']}', color: (r['totals']['absent'] as int) > 0 ? AppTheme.danger : null),
               total('${r['totals']['leave']}'),
+              total((r['overtime_hours'] ?? 0) == 0 ? '—' : '${r['overtime_hours']}',
+                  color: (r['overtime_hours'] ?? 0) > 0 ? AppTheme.primary : null),
               total(r['attendance_pct'] == null ? '—' : '${(r['attendance_pct'] as num).round()}'),
             ]),
           ),

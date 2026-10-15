@@ -1,11 +1,12 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import '../models/employee.dart';
 
-import '../main.dart' show navigatorKey;
-import '../screens/kiosk_screen.dart';
+import '../main.dart' show navigatorKey, homeScreen;
+import 'save_file.dart';
 
 /// Thrown for any non-2xx response, carrying the server's `detail` message.
 class ApiException implements Exception {
@@ -18,8 +19,10 @@ class ApiException implements Exception {
 
 class ApiService {
   // Override at build/run time: flutter run --dart-define=API_URL=http://192.168.1.10:8000
-  static const String baseUrl =
-      String.fromEnvironment('API_URL', defaultValue: 'http://127.0.0.1:8000');
+  // The web dashboard is served by the API server itself, so by default it talks to its own origin.
+  static const String _apiUrl = String.fromEnvironment('API_URL');
+  static final String baseUrl =
+      _apiUrl.isNotEmpty ? _apiUrl : kIsWeb ? Uri.base.origin : 'http://127.0.0.1:8000';
   static String? _token;
   static int?    _employeeId;
   static String? _role;
@@ -40,6 +43,10 @@ class ApiService {
   static int?    get employeeId => _employeeId;
   static String? get name       => _name;
   static bool    get isLoggedIn => _token != null;
+  /// Super admins can change things; "viewer" accounts can only look and export.
+  static bool    get canEdit    => _role == 'admin';
+  /// Face registration needs the kiosk's camera, so it's only offered in the desktop app.
+  static bool    get canRegisterFaces => canEdit && !kIsWeb;
 
   static Map<String, String> get _headers => {
     'Content-Type': 'application/json',
@@ -102,7 +109,7 @@ class ApiService {
               onPressed: () {
                 Navigator.of(ctx, rootNavigator: true).pop();
                 navigatorKey.currentState?.pushAndRemoveUntil(
-                  MaterialPageRoute(builder: (_) => const KioskScreen()),
+                  MaterialPageRoute(builder: (_) => homeScreen()),
                   (_) => false,
                 );
               },
@@ -207,13 +214,7 @@ class ApiService {
   static Future<String> downloadReport() async {
     final res = await http.get(_uri('/admin/reports/export'), headers: _headers);
     _handle(res);
-    final home = Platform.environment['USERPROFILE'] ?? Platform.environment['HOME'] ?? '.';
-    final dir  = Directory('$home${Platform.pathSeparator}Downloads');
-    if (!dir.existsSync()) dir.createSync(recursive: true);
-    final file = File('${dir.path}${Platform.pathSeparator}'
-        'attendance_${DateTime.now().millisecondsSinceEpoch}.csv');
-    await file.writeAsBytes(res.bodyBytes);
-    return file.path;
+    return saveBytes('attendance_${DateTime.now().millisecondsSinceEpoch}.csv', res.bodyBytes, mime: 'text/csv');
   }
 
   static Future<List<dynamic>> getAttendancePercentage({int? month, int? year}) async {
@@ -377,8 +378,59 @@ class ApiService {
     throw ApiException(res.statusCode, detail is String ? detail : 'Please try again.');
   }
 
-  static Future<Map<String, dynamic>> mySummary(String token) async {
-    return Map<String, dynamic>.from(_handleSelf(await http.get(_uri('/me'), headers: _self(token))));
+  /// Everything on "My dashboard". [month] picks the calendar month (default: this month).
+  static Future<Map<String, dynamic>> mySummary(String token, {DateTime? month}) async {
+    return Map<String, dynamic>.from(_handleSelf(await http.get(
+        _uri('/me', {'year': month?.year.toString(), 'month': month?.month.toString()}),
+        headers: _self(token))));
+  }
+
+  /// A short-lived link to the same PDF, shown as a QR code for phones.
+  static Future<Map<String, dynamic>> myReportLink(String token, DateTime month) async {
+    return Map<String, dynamic>.from(_handleSelf(await http.post(
+        _uri('/me/report-link', {'year': '${month.year}', 'month': '${month.month}'}), headers: _self(token))));
+  }
+
+  // ── Notices ──────────────────────────────────────────
+  /// Current notices for the kiosk lock screen (no sign-in needed).
+  static Future<List<Map<String, dynamic>>> kioskNotices() async {
+    final res = await http.get(_uri('/notices')).timeout(const Duration(seconds: 8));
+    return (_handleSelf(res) as List).cast<Map<String, dynamic>>();
+  }
+
+  static Future<List<Map<String, dynamic>>> getNotices() async {
+    return (_handle(await http.get(_uri('/admin/notices'), headers: _headers)) as List).cast<Map<String, dynamic>>();
+  }
+
+  static Future<void> saveNotice({int? id, required String title, required String body,
+      required bool pinned, DateTime? expiresOn}) async {
+    final payload = jsonEncode({'title': title, 'body': body, 'pinned': pinned,
+        'expires_on': expiresOn == null ? null : ymd(expiresOn)});
+    _handle(id == null
+        ? await http.post(_uri('/admin/notices'), headers: _headers, body: payload)
+        : await http.put(_uri('/admin/notices/$id'), headers: _headers, body: payload));
+  }
+
+  static Future<void> deleteNotice(int id) async {
+    _handle(await http.delete(_uri('/admin/notices/$id'), headers: _headers));
+  }
+
+  // ── Admin accounts ───────────────────────────────────
+  static Future<List<Map<String, dynamic>>> getAdmins() async {
+    return (_handle(await http.get(_uri('/admin/admins'), headers: _headers)) as List).cast<Map<String, dynamic>>();
+  }
+
+  static Future<void> addAdmin(String name, String username, String password, String role) async {
+    _handle(await http.post(_uri('/admin/admins'), headers: _headers, body: jsonEncode(
+        {'name': name, 'username': username, 'password': password, 'role': role})));
+  }
+
+  static Future<void> updateAdmin(int id, {String? role, bool? isActive, String? password}) async {
+    _handle(await http.patch(_uri('/admin/admins/$id'), headers: _headers, body: jsonEncode({
+      if (role != null) 'role': role,
+      if (isActive != null) 'is_active': isActive,
+      if (password != null) 'password': password,
+    })));
   }
 
   static Future<void> requestLeave(String token, DateTime start, DateTime end, String kind, String reason) async {
@@ -404,12 +456,8 @@ class ApiService {
     final res = await http.get(
         _uri('/admin/register.xlsx', {'year': '$year', 'month': '$month'}), headers: _headers);
     _handle(res);
-    final home = Platform.environment['USERPROFILE'] ?? Platform.environment['HOME'] ?? '.';
-    final dir = Directory('$home${Platform.pathSeparator}Downloads');
-    if (!dir.existsSync()) dir.createSync(recursive: true);
-    final file = File('${dir.path}${Platform.pathSeparator}attendance-$year-${month.toString().padLeft(2, '0')}.xlsx');
-    await file.writeAsBytes(res.bodyBytes);
-    return file.path;
+    return saveBytes('attendance-$year-${month.toString().padLeft(2, '0')}.xlsx', res.bodyBytes,
+        mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   }
 
   static Future<Map<String, dynamic>> getProfile(int employeeId, int year, int month) async {

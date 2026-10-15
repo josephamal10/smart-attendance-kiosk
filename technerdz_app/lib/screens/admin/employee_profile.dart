@@ -99,14 +99,17 @@ class _EmployeeProfileViewState extends State<EmployeeProfileView> {
               ]),
             ]),
           ),
-          OutlinedButton.icon(onPressed: () => widget.onEdit(emp), icon: const Icon(Icons.edit_outlined, size: 18),
-              label: const Text('Edit details')),
-          const SizedBox(width: 10),
-          ElevatedButton.icon(
-            onPressed: () => widget.onRegisterFace(emp, replace: faces > 0),
-            icon: const Icon(Icons.center_focus_strong_outlined, size: 18),
-            label: Text(faces > 0 ? 'Re-register face' : 'Register face'),
-          ),
+          if (ApiService.canEdit)
+            OutlinedButton.icon(onPressed: () => widget.onEdit(emp), icon: const Icon(Icons.edit_outlined, size: 18),
+                label: const Text('Edit details')),
+          if (ApiService.canRegisterFaces) ...[
+            const SizedBox(width: 10),
+            ElevatedButton.icon(
+              onPressed: () => widget.onRegisterFace(emp, replace: faces > 0),
+              icon: const Icon(Icons.center_focus_strong_outlined, size: 18),
+              label: Text(faces > 0 ? 'Re-register face' : 'Register face'),
+            ),
+          ],
         ]),
       ),
       const SizedBox(height: AppTheme.gap),
@@ -130,7 +133,10 @@ class _EmployeeProfileViewState extends State<EmployeeProfileView> {
             caption: '${t['leave'] ?? 0} on leave')),
         const SizedBox(width: AppTheme.gap),
         Expanded(child: StatCard(label: 'Hours worked', value: '${row?['worked_hours'] ?? 0}h',
-            icon: Icons.timelapse, tone: Tone.primary)),
+            icon: Icons.timelapse, tone: Tone.primary,
+            caption: (row?['overtime_hours'] ?? 0) > 0
+                ? '${row!['overtime_hours']}h overtime · shift ${row['shift']}'
+                : 'Shift ${row?['shift'] ?? ''}')),
       ])),
       const SizedBox(height: AppTheme.gap),
       Row(crossAxisAlignment: CrossAxisAlignment.start, children: [

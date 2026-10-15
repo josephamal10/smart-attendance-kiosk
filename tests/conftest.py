@@ -54,7 +54,7 @@ def make_employee(db_session):
     def _make(username, role="user", password="secret123", active=True, category="Developer"):
         db = db_session()
         emp = Employee(name=username.title(), username=username, category=category,
-                       password=hash_password(password) if role == "admin" else NO_PASSWORD,
+                       password=hash_password(password) if role in ("admin", "viewer") else NO_PASSWORD,
                        role=role, is_active=active)
         db.add(emp)
         db.commit()

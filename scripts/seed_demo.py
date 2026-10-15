@@ -6,7 +6,7 @@ for screenshots and UI work. Never touches the real technerdz.db.
     set DATABASE_URL=sqlite:///./demo.db && set CORS_ORIGINS=http://localhost:5180
     python -m uvicorn main:app --port 8001
 
-Demo admin: username "demo-admin", password from --password (default below).
+Demo admins: "demo-admin" (super) and "hr-viewer" (read-only), password from --password (default below).
 Employees have no passwords (they check in by face), like the real system.
 """
 import argparse
@@ -27,6 +27,12 @@ PEOPLE = [
 ]
 
 
+def _next_weekday(d: date) -> date:
+    while d.weekday() >= 4:  # Fri–Sun: start on a Monday so a 2-day leave stays on weekdays
+        d += timedelta(days=1)
+    return d
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--db", default=os.path.join(ROOT, "demo.db"))
@@ -43,8 +49,8 @@ def main():
     from sqlalchemy.orm import sessionmaker
     from database import init_db
     from models import (AttendanceLog, CorrectionRequest, Employee, FaceImage, Holiday,
-                        LeaveRequest, NO_PASSWORD)
-    from services import audit
+                        LeaveRequest, NO_PASSWORD, Notice)
+    from services import audit, settings_service
     from auth import hash_password
 
     engine = create_engine(os.environ["DATABASE_URL"])
@@ -54,10 +60,13 @@ def main():
 
     db.add(Employee(name="Demo Admin", username="demo-admin",
                     password=hash_password(args.password), role="admin"))
+    db.add(Employee(name="Hema Shankar", username="hr-viewer",
+                    password=hash_password(args.password), role="viewer"))
+    joined = datetime.now() - timedelta(days=90)  # so streaks and badges have history to look at
     emps = []
     for name, category in PEOPLE:
         e = Employee(name=name, username=f"emp-{name.split()[0].lower()}", category=category,
-                     password=NO_PASSWORD, role="user")
+                     password=NO_PASSWORD, role="user", created_at=joined)
         db.add(e)
         emps.append(e)
     db.commit()
@@ -70,14 +79,28 @@ def main():
                                  direction=d, embedding=json.dumps([0.0] * 128)))
 
     today = date.today()
+    # Developers work 10–7; everyone else uses the office hours
+    settings_service.put(db, "team_shifts", {"Developer": {"start": "10:00", "end": "19:00"}})
+    priya = emps[1]
+    priya_leave = today - timedelta(days=today.weekday() + 5)  # last week's Wednesday
     for e in emps:
         reliability = rng.uniform(0.6, 0.98)
-        for back in range(42, -1, -1):
+        shift_start = time(10, 0) if e.category == "Developer" else time(9, 0)
+        for back in range(60, -1, -1):
             day = today - timedelta(days=back)
-            if day.weekday() >= 5 or rng.random() > reliability:
-                continue
-            start = datetime.combine(day, time(8, 45)) + timedelta(minutes=rng.gauss(20, 18))
-            end = start + timedelta(hours=rng.uniform(7.5, 9.5))
+            if e is priya:
+                # The screenshot employee: reliable and usually early, one late day, one day of leave
+                if day.weekday() >= 5 or day == priya_leave:
+                    continue
+                start = datetime.combine(day, time(8, 38)) + timedelta(minutes=rng.randint(0, 14))
+                if back == 23:
+                    start = datetime.combine(day, time(9, 32))
+                end = start + timedelta(hours=9, minutes=rng.randint(15, 75))
+            else:
+                if day.weekday() >= 5 or rng.random() > reliability:
+                    continue
+                start = datetime.combine(day, shift_start) + timedelta(minutes=rng.gauss(5, 18) - 15)
+                end = start + timedelta(hours=rng.uniform(7.5, 10))
             if day == today:
                 if rng.random() < 0.25:
                     continue  # not in yet today
@@ -102,6 +125,21 @@ def main():
                         end_date=today + timedelta(days=2), kind="other", reason="Visa appointment"))
     db.add(CorrectionRequest(employee_id=emps[4].id, date=today - timedelta(days=1),
                              kind="missed_checkout", note="Left at 6:40 PM, forgot to scan"))
+    # Priya: an approved day off last week, a request waiting, a fixed correction
+    db.add(LeaveRequest(employee_id=priya.id, start_date=priya_leave, end_date=priya_leave, kind="casual",
+                        reason="Family function", status="approved", decided_by=admin.id,
+                        created_at=datetime.now() - timedelta(days=12), decided_at=datetime.now() - timedelta(days=11)))
+    db.add(LeaveRequest(employee_id=priya.id, start_date=_next_weekday(today + timedelta(days=4)), end_date=_next_weekday(today + timedelta(days=4)) + timedelta(days=1),
+                        kind="casual", reason="Trip home", created_at=datetime.now() - timedelta(hours=3)))
+    db.add(CorrectionRequest(employee_id=priya.id, date=today - timedelta(days=16), kind="wrong_time",
+                             note="Scanned twice by mistake", status="resolved",
+                             created_at=datetime.now() - timedelta(days=15), resolved_at=datetime.now() - timedelta(days=14)))
+    db.add(Notice(title="Diwali party on Friday", body="4 PM in the cafeteria. Snacks and games — everyone welcome!",
+                  pinned=True, created_by="Demo Admin"))
+    db.add(Notice(title="New team shifts", body="Developers now work 10 AM – 7 PM. Everyone else stays 9 – 6.",
+                  created_by="Demo Admin", expires_on=today + timedelta(days=20)))
+    db.add(Notice(title="Old notice", body="Expired, so the kiosk no longer shows it.",
+                  created_by="Demo Admin", expires_on=today - timedelta(days=3)))
     yesterday = db.query(AttendanceLog).filter(AttendanceLog.employee_id == emps[4].id,
                                                AttendanceLog.date < today.isoformat())                   .order_by(AttendanceLog.date.desc()).first()
     if yesterday:
@@ -113,7 +151,8 @@ def main():
     audit.record(db, admin, "holiday.added", details=f"{today + timedelta(days=12)}: Diwali")
     audit.record(db, admin, "leave.approved", employee_id=emps[3].id, details=f"sick {today} → {today + timedelta(days=1)}")
     db.commit()
-    print(f"Demo database written to {args.db}: {len(emps)} employees, admin 'demo-admin'.")
+    print(f"Demo database written to {args.db}: {len(emps)} employees, "
+          "admins 'demo-admin' (super) and 'hr-viewer' (read-only).")
 
 
 if __name__ == "__main__":

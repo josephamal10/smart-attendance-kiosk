@@ -85,6 +85,7 @@ def check_in(
         late_minutes=ev.late_minutes,
         early_minutes=ev.early_minutes,
         worked_minutes=ev.worked_minutes,
+        overtime_minutes=ev.overtime_minutes,
         # Lets this person open "My attendance" for a few minutes, no password needed
         self_token=create_access_token({"sub": str(employee.id), "type": "self"},
                                        expires=timedelta(minutes=3)),

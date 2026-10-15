@@ -4,6 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:technerdz_app/models/employee.dart';
 import 'package:technerdz_app/screens/admin_login_screen.dart';
 import 'package:technerdz_app/screens/kiosk_screen.dart';
+import 'package:technerdz_app/screens/my_attendance_screen.dart';
+import 'package:technerdz_app/services/api_service.dart';
 import 'package:technerdz_app/widgets/ui.dart';
 
 void main() {
@@ -93,5 +95,64 @@ void main() {
     await tester.pump();
     expect(find.text('HOW TO CHECK IN'), findsOneWidget);
     await tester.binding.setSurfaceSize(null);
+  });
+
+  testWidgets('My dashboard shows calendar, hours, leave balance, badges, notices and team', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1366, 1400));
+    final now = DateTime.now();
+    final first = DateTime(now.year, now.month, 1);
+    final days = DateUtils.getDaysInMonth(now.year, now.month);
+    String ymd(DateTime d) => d.toIso8601String().substring(0, 10);
+    final data = {
+      'month': {'present': 9, 'late': 1, 'leave': 1, 'absent': 0, 'working_days': 11, 'avg_hours': 8.9,
+          'overtime_hours': 2.5},
+      'calendar': {
+        'year': now.year, 'month': now.month, 'month_name': 'This month',
+        'days': [for (var i = 0; i < days; i++)
+          {'date': ymd(first.add(Duration(days: i))), 'day': i + 1, 'weekday': 'Mon', 'working': true, 'holiday': null}],
+        'row': {'cells': [for (var i = 0; i < days; i++)
+          i == 0 ? {'status': 'late', 'in': '09:40', 'out': '18:00', 'flags': ['late'], 'worked_minutes': 500,
+              'overtime_minutes': 0} : {'status': 'future'}]},
+      },
+      'weekly_hours': [for (var i = 0; i < 8; i++) {'week_start': '2026-01-01', 'label': 'W$i', 'hours': 40.0 + i, 'expected': 45.0}],
+      'streak': {'current': 6, 'best': 12},
+      'badges': [
+        {'key': 'on_a_roll', 'title': 'On a roll', 'description': '5 in a row', 'earned': true, 'progress': '5/5'},
+        {'key': 'perfect_week', 'title': 'Perfect week', 'description': 'All on time', 'earned': false, 'progress': null},
+      ],
+      'leave_balance': [{'kind': 'casual', 'label': 'Casual', 'allowance': 12, 'used': 4, 'pending': 1, 'remaining': 8}],
+      'updates': [{'type': 'leave', 'title': 'Casual leave, 20 Oct', 'status': 'approved', 'at': now.toIso8601String()}],
+      'notices': [{'id': 1, 'title': 'Fire drill Friday', 'body': 'At 11 AM', 'pinned': true, 'expires_on': null,
+          'created_at': now.toIso8601String(), 'created_by': 'Boss'}],
+      'team': {'name': 'Tester', 'shift': '09:00–18:00', 'members': 4, 'on_leave_today': ['Mira'],
+          'upcoming_holidays': [{'date': ymd(now.add(const Duration(days: 3))), 'name': 'Founders day', 'in_days': 3}]},
+    };
+    await tester.pumpWidget(MaterialApp(home: MyAttendanceScreen(token: 't', name: 'Arun Kumar',
+        category: 'Tester', demoData: data)));
+    await tester.pump();
+
+    expect(find.text('MY DASHBOARD'), findsOneWidget);
+    expect(find.text('6-day on-time streak'), findsOneWidget);
+    expect(find.text('Hours per week'), findsOneWidget);
+    expect(find.text('2.5h'), findsOneWidget);                 // overtime
+    expect(find.textContaining('of 12 left', findRichText: true), findsOneWidget);
+    expect(find.text('4 used · 1 waiting for approval'), findsOneWidget);
+    expect(find.text('Perfect week'), findsOneWidget);
+    expect(find.text('Fire drill Friday'), findsOneWidget);
+    expect(find.text('Approved'), findsOneWidget);
+    expect(find.text('Mira'), findsOneWidget);
+    expect(find.text('Founders day'), findsOneWidget);
+    expect(find.text('Show QR code'), findsOneWidget);
+    await tester.binding.setSurfaceSize(null);
+  });
+
+  test('Only super admins can change things; faces need the desktop app', () {
+    ApiService.setSession('t', 1, 'viewer', 'HR');
+    expect(ApiService.canEdit, isFalse);
+    expect(ApiService.canRegisterFaces, isFalse);
+    ApiService.setSession('t', 1, 'admin', 'Boss');
+    expect(ApiService.canEdit, isTrue);
+    expect(ApiService.canRegisterFaces, isTrue); // tests run on the desktop VM, not web
+    ApiService.clearSession();
   });
 }

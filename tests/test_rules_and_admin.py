@@ -57,6 +57,30 @@ def test_leaving_within_grace_is_not_early():
     assert "early_leave" in ev.flags and ev.early_minutes == 20
 
 
+def test_team_shift_changes_what_counts_as_late():
+    rules = _rules(shifts={"Developer": (datetime.strptime("10:00", "%H:%M").time(),
+                                         datetime.strptime("19:00", "%H:%M").time())})
+    log = _mk("2026-10-12", "09:50", "19:00")
+    assert "late" not in R.evaluate(log, rules, team="Developer").flags  # their shift starts at 10
+    assert "late" in R.evaluate(log, rules, team="HR").flags            # default 9:00 shift
+
+
+def test_overtime_beyond_shift_length():
+    ev = R.evaluate(_mk("2026-10-12", "09:00", "19:30"), _rules())
+    assert ev.overtime_minutes == 90
+    assert R.evaluate(_mk("2026-10-12", "09:00", "18:10"), _rules()).overtime_minutes == 0  # within grace
+
+
+def test_team_shifts_saved_and_validated(client, make_employee, login):
+    make_employee("boss", role="admin")
+    h = login("boss")
+    ok = client.put("/admin/settings", headers=h, json=_settings(team_shifts={"Developer": {"start": "10:00", "end": "19:00"}}))
+    assert ok.status_code == 200 and ok.json()["team_shifts"]["Developer"]["start"] == "10:00"
+    bad = client.put("/admin/settings", headers=h, json=_settings(team_shifts={"Developer": {"start": "19:00", "end": "10:00"}}))
+    assert bad.status_code == 422
+    assert client.put("/admin/settings", headers=h, json=_settings(team_shifts={"Astronaut": {"start": "09:00", "end": "17:00"}})).status_code == 422
+
+
 def test_full_day_has_no_flags():
     ev = R.evaluate(_mk("2026-10-12", "08:55", "18:05"), _rules())
     assert ev.flags == [] and ev.worked_minutes == 550

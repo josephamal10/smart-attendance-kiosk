@@ -178,7 +178,13 @@ class _SettingsPageState extends State<SettingsPage> {
     final emails = (_edit['hr_emails'] as List).cast<String>();
     final smtp = _s!['smtp_configured'] == true;
 
+    final readOnly = !ApiService.canEdit;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      if (readOnly) ...[
+        const InfoBanner('You can see the settings but not change them. Ask a super admin.', tone: Tone.primary),
+        const SizedBox(height: AppTheme.gap),
+      ],
+      AbsorbPointer(absorbing: readOnly, child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       _section('Work hours & rules', Icons.schedule_outlined, [
         _row('Office hours', 'Used to mark late arrivals and early leavers.',
             Row(mainAxisSize: MainAxisSize.min, children: [
@@ -206,8 +212,23 @@ class _SettingsPageState extends State<SettingsPage> {
             ])),
         _row('Check-out gap', 'A second scan sooner than this after check-in is ignored, not a check-out.',
             _stepper('min_checkout_minutes', step: 5, min: 0, max: 120, suffix: ' min')),
-        _row('Auto check-out', 'Anyone who forgets to check out is checked out at the office end time and flagged.',
+        _row('Auto check-out', 'Anyone who forgets to check out is checked out at their shift end time and flagged.',
             const StatusBadge('Always on', tone: Tone.success)),
+      ]),
+      const SizedBox(height: AppTheme.gap),
+      _section('Team shifts', Icons.groups_outlined, [
+        Padding(
+          padding: const EdgeInsets.only(top: 10),
+          child: Text('Teams without their own shift use the office hours above. Late, early leave, '
+              'overtime and auto check-out all follow the team\'s shift.', style: AppTheme.muted),
+        ),
+        for (final team in _teams) _shiftRow(team),
+      ]),
+      const SizedBox(height: AppTheme.gap),
+      _section('Leave allowance', Icons.beach_access_outlined, [
+        _allowanceRow('casual', 'Casual leave', 'Days per year. Shown to employees as their leave balance.'),
+        _allowanceRow('sick', 'Sick leave', 'Days per year.'),
+        _allowanceRow('other', 'Other leave', 'Days per year. Leave at 0 to hide it from the balance.'),
       ]),
       const SizedBox(height: AppTheme.gap),
       _section('Daily email to HR', Icons.mail_outline, [
@@ -300,9 +321,10 @@ class _SettingsPageState extends State<SettingsPage> {
               builder: (_, dark, __) => Switch(value: dark, onChanged: Appearance.setDark),
             )),
       ]),
+      ])),
       const SizedBox(height: 20),
       if (_error != null) ...[InfoBanner(_error!), const SizedBox(height: 12)],
-      Row(children: [
+      if (!readOnly) Row(children: [
         if (_dirty) Text('You have unsaved changes', style: AppTheme.muted.copyWith(color: AppTheme.warning)),
         const Spacer(),
         OutlinedButton(
@@ -319,5 +341,50 @@ class _SettingsPageState extends State<SettingsPage> {
         ),
       ]),
     ]);
+  }
+
+  // ── Team shifts & leave allowance ──────────────────────────
+  static const _teams = ['HR', 'Project Manager', 'Admin', 'Developer', 'Tester'];
+
+  Map<String, dynamic> get _shifts => Map<String, dynamic>.from(_edit['team_shifts'] ?? {});
+
+  Widget _shiftRow(String team) {
+    final shift = _shifts[team] as Map?;
+    Widget pick(String which) => OutlinedButton(
+          onPressed: () async {
+            final t = await showTimePicker(context: context, initialTime: _tod(shift[which]));
+            if (t == null) return;
+            _set('team_shifts', {..._shifts, team: {...Map<String, dynamic>.from(shift), which: _hhmm(t)}});
+          },
+          child: Text(_tod(shift![which]).format(context)),
+        );
+    return _row(team, shift == null ? 'Office hours (${_edit['work_start']}–${_edit['work_end']})' : 'Own shift',
+        Row(mainAxisSize: MainAxisSize.min, children: [
+          if (shift != null) ...[
+            pick('start'),
+            Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: Text('to', style: AppTheme.muted)),
+            pick('end'),
+            const SizedBox(width: 12),
+          ],
+          Switch(
+            value: shift != null,
+            onChanged: (on) => _set('team_shifts', on
+                ? {..._shifts, team: {'start': _edit['work_start'], 'end': _edit['work_end']}}
+                : (_shifts..remove(team))),
+          ),
+        ]));
+  }
+
+  Widget _allowanceRow(String kind, String title, String help) {
+    final all = Map<String, dynamic>.from(_edit['leave_allowance'] ?? {});
+    final v = (all[kind] as num?)?.toInt() ?? 0;
+    return _row(title, help, Row(mainAxisSize: MainAxisSize.min, children: [
+      IconButton.outlined(onPressed: v <= 0 ? null : () => _set('leave_allowance', {...all, kind: v - 1}),
+          icon: const Icon(Icons.remove, size: 18)),
+      SizedBox(width: 84, child: Text('$v days', textAlign: TextAlign.center,
+          style: AppTheme.h3.copyWith(fontFeatures: AppTheme.tabular))),
+      IconButton.outlined(onPressed: v >= 60 ? null : () => _set('leave_allowance', {...all, kind: v + 1}),
+          icon: const Icon(Icons.add, size: 18)),
+    ]));
   }
 }

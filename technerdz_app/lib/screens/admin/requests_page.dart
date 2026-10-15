@@ -125,7 +125,7 @@ class _RequestsPageState extends State<RequestsPage> {
         const Spacer(),
         if (_loading) const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
         const SizedBox(width: 12),
-        if (_tab == 'leave')
+        if (_tab == 'leave' && ApiService.canEdit)
           OutlinedButton.icon(onPressed: _recordLeave, icon: const Icon(Icons.add, size: 18),
               label: const Text('Record leave')),
       ]),
@@ -153,7 +153,7 @@ class _RequestsPageState extends State<RequestsPage> {
             Text(_leaveKind(l.kind), style: AppTheme.body),
             Text(l.reason.isEmpty ? '—' : l.reason, style: AppTheme.muted, maxLines: 2, overflow: TextOverflow.ellipsis),
             _statusBadge(l.status),
-            l.status != 'pending'
+            l.status != 'pending' || !ApiService.canEdit
                 ? const SizedBox.shrink()
                 : Row(mainAxisSize: MainAxisSize.min, children: [
                     OutlinedButton(onPressed: () => _decideLeave(l, false), child: const Text('Reject')),
@@ -184,7 +184,7 @@ class _RequestsPageState extends State<RequestsPage> {
             Text(_kindLabel(c.kind), style: AppTheme.body),
             Text(c.note.isEmpty ? '—' : c.note, style: AppTheme.muted, maxLines: 2, overflow: TextOverflow.ellipsis),
             _statusBadge(c.status),
-            c.status != 'pending'
+            c.status != 'pending' || !ApiService.canEdit
                 ? const SizedBox.shrink()
                 : Row(mainAxisSize: MainAxisSize.min, children: [
                     OutlinedButton(onPressed: () => _rejectCorrection(c), child: const Text('Reject')),

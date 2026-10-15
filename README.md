@@ -4,7 +4,7 @@ A desktop kiosk where employees check in and out by looking at a camera.
 **FastAPI** backend + **Flutter (Windows)** frontend, with face recognition
 (YuNet + SFace, ONNX via OpenCV), a server-enforced blink liveness check (MediaPipe Face Landmarker), a **face
 anti-spoofing CNN served with ONNX Runtime** ([ml/antispoof](ml/antispoof/README.md))
-and an admin dashboard.
+an admin dashboard (desktop and **web**) and a personal dashboard for every employee.
 
 
 | Walk-up kiosk | Admin overview |
@@ -14,8 +14,14 @@ and an admin dashboard.
 | ![Monthly register](docs/screenshots/register.png) | ![Employee profile](docs/screenshots/profile.png) |
 | **Analytics** | **Dark mode** |
 | ![Analytics](docs/screenshots/analytics.png) | ![Analytics, dark](docs/screenshots/analytics-dark.png) |
-| **My attendance** (employee, opened by face) | **Requests** |
-| ![My attendance](docs/screenshots/my-attendance.png) | ![Requests](docs/screenshots/requests.png) |
+| **Requests** | **Notice board** (shown on the kiosk) |
+| ![Requests](docs/screenshots/requests.png) | ![Notice board](docs/screenshots/notices.png) |
+| **Admin accounts** (super admin / read-only HR viewer) | **Settings** with per-team shifts |
+| ![Admin accounts](docs/screenshots/admins.png) | ![Settings, dark](docs/screenshots/settings-dark.png) |
+
+**My dashboard** — each employee's own page, opened at the kiosk by face (no password):
+
+![My dashboard](docs/screenshots/my-attendance.png)
 
 <sub>Screenshots use made-up demo data (`scripts/seed_demo.py`) and are regenerated with
 `python scripts/screenshots.py`.</sub>
@@ -49,19 +55,26 @@ Employees have **no username or password** — they walk up, look at the camera 
 Employees belong to a team: **HR, Project Manager, Admin, Developer, Tester**. "Admin" is a job
 title; dashboard access comes only from an admin account (small icon on the kiosk → username +
 password, any password you like, changeable in the dashboard; signs out after 5 idle minutes).
+Admin accounts are either **super admins** (change anything) or **HR viewers** (see and export
+everything, change nothing — enforced by the API, not just hidden buttons).
+
+Each team can have its **own shift** (e.g. Developers 10:00–19:00); late, early leave, overtime
+and auto check-out all follow it.
 
 ## Features
 | For employees (kiosk) | For admins (dashboard) |
 |---|---|
 | Walk up, blink, recognised — no password | Overview: present, late, not in, by team, pending requests |
-| "Good morning, Priya! On time" / "Late by 12 min" / "Worked 8h 05m" | Attendance with Late / Left early / Half day / Missed check-out badges |
-| **My attendance** (by face): month stats, recent days | Corrections and added days with a required reason |
-| Request leave, report a missed check-out | Requests: approve/reject leave, fix reported records |
-| Closes itself after a minute idle | Holidays calendar (excluded from absences) |
-| | Analytics: daily on-time vs late, arrival trend, late by team, punctuality |
-| | Audit log of every admin and system action |
-| | Monthly register (P/L/A/LV/H grid) with **Excel export** and per-employee profiles |
-| | Settings: office hours, grace period, half day, days off, HR email, backups, dark mode |
+| "Good morning, Priya! On time" / "Late by 12 min" / "Worked 8h 05m" | Attendance with Late / Left early / Half day / Missed check-out / **Overtime** badges |
+| **My dashboard** (person icon → scan, no check-in recorded) | Corrections and added days with a required reason |
+| Calendar of the month, hours per week vs expected, overtime | Requests: approve/reject leave, fix reported records |
+| **Leave balance** (yearly allowance − approved leave, pending shown) | Holidays calendar (excluded from absences) |
+| **On-time streak** and badges (Perfect week, Early bird, Extra mile...) | **Notice board**: posts appear on the kiosk and in every dashboard |
+| Notices, replies to my requests, my team's leave today, upcoming holidays | Analytics: daily on-time vs late, arrival trend, late by team, punctuality |
+| **Monthly PDF report** via a QR code — downloads on your phone, nothing saved on the kiosk | Audit log of every admin and system action |
+| Request leave, report a missed check-out | Monthly register (P/L/A/LV/H grid, overtime) with **Excel export** and per-employee profiles |
+| Closes itself after 90 s idle | **Admin accounts** with roles; **web dashboard** for HR's own computers |
+| | Settings: office hours, **team shifts**, grace, half day, days off, **leave allowance**, HR email, backups, dark mode |
 
 Automatic jobs: forgotten check-outs are closed at office end time (flagged), HR gets a daily
 summary email (Gmail SMTP; saved to `reports/emails/` until SMTP is configured), and the
@@ -73,6 +86,13 @@ CI: GitHub Actions runs the backend tests and Flutter analyze/tests on every pus
 
 **Quickest (Windows, after setup):** double-click `run.bat`. It starts the server in its own
 window, waits until it's ready, then opens the kiosk app. Close the server window to stop it.
+
+**Web dashboard** (for HR on their own computers): run `scripts\build_web.bat` once, restart the
+server, then open `http://<kiosk-pc-ip>:8000/app/` in a browser and sign in with an admin account.
+It's the same Flutter app compiled for the web, served by the API server itself, so there's no CORS
+or separate hosting. Face registration stays on the kiosk PC (it needs the camera).
+`run.bat` listens on the office network (`HOST=0.0.0.0`) so browsers and phones can reach it; set
+`HOST=127.0.0.1` in it to keep everything on the kiosk PC.
 
 **Backend with Docker** (any OS):
 ```bash
@@ -88,7 +108,7 @@ pip install -r requirements-dev.txt
 copy .env.example .env          # then set SECRET_KEY
 python scripts/create_admin.py --username admin --name "Admin"
 uvicorn main:app --reload       # API docs at http://127.0.0.1:8000/docs
-pytest                          # 92 tests, no camera needed
+pytest                          # 118 tests, no camera needed
 ```
 
 **App** (Flutter, Windows desktop):
@@ -100,8 +120,14 @@ flutter run -d windows --dart-define=API_URL=http://<server-ip>:8000
 ```
 
 ## Security notes
-- Only the two kiosk endpoints are open, and both are gated by liveness + anti-spoofing; everything
-  else needs an admin JWT. There is no public list of employee names.
+- The kiosk endpoints (check-in, open my dashboard) are gated by liveness + anti-spoofing; admin
+  pages need an admin JWT. Only current notices are public. There is no public list of employee names.
+- Tokens are typed: admin `access`, single-use `liveness`, 5-minute `self` (my dashboard) and
+  10-minute `report` (one person's PDF, for the QR link). Each endpoint accepts only its own type.
+- HR viewer accounts are read-only on the server: every write endpoint requires a super admin, and
+  the last active super admin can't be demoted or disabled.
+- On the office network the server speaks plain HTTP. Put it behind HTTPS (e.g. a reverse proxy)
+  before using the web dashboard over Wi-Fi you don't trust.
 - Employees have no password at all (`!` placeholder that can never match), so their accounts
   can't be used to sign in.
 - Login lockout is per (username, IP) so one machine can't lock someone out everywhere.

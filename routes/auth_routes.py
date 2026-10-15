@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import Employee
 from schemas import LoginRequest, TokenResponse, PasswordChange
-from auth import hash_password, verify_password, create_access_token, require_admin
+from auth import ADMIN_ROLES, hash_password, verify_password, create_access_token, require_admin
 from datetime import datetime, timedelta
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -52,7 +52,7 @@ def login(data: LoginRequest, request: Request, db: Session = Depends(get_db)):
     _check_lockout(key)
 
     emp = db.query(Employee).filter(Employee.username == data.username).first()
-    is_admin = emp is not None and emp.role == "admin" and emp.is_active
+    is_admin = emp is not None and emp.role in ADMIN_ROLES and emp.is_active
     if not is_admin or not verify_password(data.password, emp.password):
         attempts_left = _record_failure(key)
         if attempts_left <= 0:

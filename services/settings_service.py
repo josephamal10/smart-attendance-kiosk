@@ -18,6 +18,8 @@ DEFAULTS: dict[str, Any] = {
     "half_day_hours":       4.0,      # worked less than this = Half day
     "weekend_days":         [5, 6],   # Monday = 0 ... Sunday = 6
     "min_checkout_minutes": 5,        # scans sooner than this after check-in don't check out
+    "team_shifts":          {},       # {"Developer": {"start": "10:00", "end": "19:00"}}
+    "leave_allowance":      {"casual": 12, "sick": 7, "other": 0},  # days per year
     "hr_emails":            [],       # who gets the daily summary
     "email_enabled":        False,
     "email_time":           "19:00",

@@ -27,7 +27,11 @@ def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    # A non-hash value (e.g. employees' "!" placeholder) must simply never match, not crash
+    try:
+        return pwd_context.verify(plain, hashed)
+    except (ValueError, TypeError):
+        return False
 
 def create_access_token(data: dict, expires: timedelta | None = None) -> str:
     to_encode = data.copy()
@@ -55,9 +59,21 @@ def get_current_user(token: str = Depends(oauth2_scheme),
         raise HTTPException(status_code=401, detail="Account not found or disabled")
     return emp
 
+# Dashboard roles: "admin" = super admin (everything), "viewer" = HR viewer (read + export only)
+ADMIN_ROLES = ("admin", "viewer")
+
+
 def require_admin(user: Employee = Depends(get_current_user)) -> Employee:
-    if user.role != "admin":
+    """Any dashboard account — enough to view and export."""
+    if user.role not in ADMIN_ROLES:
         raise HTTPException(status_code=403, detail="Admin access required")
+    return user
+
+
+def require_super(user: Employee = Depends(get_current_user)) -> Employee:
+    """Changes (edits, approvals, settings, faces) need a super admin."""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Your account can view but not change things. Ask a super admin.")
     return user
 
 def require_self_or_admin(employee_id: int, user: Employee) -> None:

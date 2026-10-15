@@ -4,7 +4,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
 from sqlalchemy.orm import Session
 
-from auth import get_current_user, require_self_or_admin
+from auth import ADMIN_ROLES, get_current_user, require_self_or_admin
 from database import get_db
 from models import Employee, FaceImage
 from services import audit
@@ -88,6 +88,7 @@ def face_count(
     user: Employee = Depends(get_current_user),
 ):
     """Return how many face images are stored for an employee."""
-    require_self_or_admin(employee_id, user)
+    if user.role not in ADMIN_ROLES and user.id != employee_id:
+        raise HTTPException(status_code=403, detail="Not allowed for this employee")
     count = get_face_count_by_employee(db, employee_id)
     return {"employee_id": employee_id, "count": count, "total": count}

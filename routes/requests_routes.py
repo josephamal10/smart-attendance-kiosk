@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from auth import require_admin
+from auth import require_admin, require_super
 from database import get_db
 from models import CorrectionRequest, Employee, Holiday, LeaveRequest
 from schemas import (AdminLeaveIn, CorrectionDecision, CorrectionOut, Decision,
@@ -32,7 +32,7 @@ def list_holidays(year: int | None = Query(None, ge=2000, le=2100), db: Session 
     return q.order_by(Holiday.date).all()
 
 @router.post("/holidays", response_model=HolidayOut)
-def add_holiday(data: HolidayIn, db: Session = Depends(get_db), admin: Employee = Depends(require_admin)):
+def add_holiday(data: HolidayIn, db: Session = Depends(get_db), admin: Employee = Depends(require_super)):
     h = Holiday(date=data.date, name=data.name.strip())
     db.add(h)
     try:
@@ -46,7 +46,7 @@ def add_holiday(data: HolidayIn, db: Session = Depends(get_db), admin: Employee 
     return h
 
 @router.delete("/holidays/{holiday_id}")
-def delete_holiday(holiday_id: int, db: Session = Depends(get_db), admin: Employee = Depends(require_admin)):
+def delete_holiday(holiday_id: int, db: Session = Depends(get_db), admin: Employee = Depends(require_super)):
     h = db.get(Holiday, holiday_id)
     if not h:
         raise HTTPException(status_code=404, detail="Holiday not found")
@@ -67,7 +67,7 @@ def list_leave(status: str | None = Query(None, pattern="^(pending|approved|reje
     return q.order_by(LeaveRequest.created_at.desc()).all()
 
 @router.post("/leave", response_model=LeaveOut)
-def add_leave(data: AdminLeaveIn, db: Session = Depends(get_db), admin: Employee = Depends(require_admin)):
+def add_leave(data: AdminLeaveIn, db: Session = Depends(get_db), admin: Employee = Depends(require_super)):
     """Admin records leave directly (already approved)."""
     if not db.get(Employee, data.employee_id):
         raise HTTPException(status_code=404, detail="Employee not found")
@@ -83,7 +83,7 @@ def add_leave(data: AdminLeaveIn, db: Session = Depends(get_db), admin: Employee
 
 @router.post("/leave/{leave_id}/decision", response_model=LeaveOut)
 def decide_leave(leave_id: int, data: Decision, db: Session = Depends(get_db),
-                 admin: Employee = Depends(require_admin)):
+                 admin: Employee = Depends(require_super)):
     lr = db.get(LeaveRequest, leave_id)
     if not lr:
         raise HTTPException(status_code=404, detail="Leave request not found")
@@ -107,7 +107,7 @@ def list_corrections(status: str | None = Query(None, pattern="^(pending|resolve
 
 @router.post("/corrections/{request_id}/decision", response_model=CorrectionOut)
 def decide_correction(request_id: int, data: CorrectionDecision, db: Session = Depends(get_db),
-                      admin: Employee = Depends(require_admin)):
+                      admin: Employee = Depends(require_super)):
     """Mark a request handled. The actual time fix is done with PATCH /admin/attendance/{id}."""
     cr = db.get(CorrectionRequest, request_id)
     if not cr:

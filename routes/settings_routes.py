@@ -3,7 +3,7 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from auth import require_admin
+from auth import require_admin, require_super
 from database import get_db
 from models import Employee
 from schemas import SettingsModel
@@ -24,7 +24,7 @@ def get_settings(db: Session = Depends(get_db)):
 
 
 @router.put("")
-def save_settings(data: SettingsModel, db: Session = Depends(get_db), admin: Employee = Depends(require_admin)):
+def save_settings(data: SettingsModel, db: Session = Depends(get_db), admin: Employee = Depends(require_super)):
     if settings_service.parse_hhmm(data.work_end) <= settings_service.parse_hhmm(data.work_start):
         raise HTTPException(status_code=422, detail="Office end time must be after the start time.")
     old = settings_service.get_all(db)
@@ -40,7 +40,7 @@ def save_settings(data: SettingsModel, db: Session = Depends(get_db), admin: Emp
 
 
 @router.post("/test-email")
-def test_email(db: Session = Depends(get_db), admin: Employee = Depends(require_admin)):
+def test_email(db: Session = Depends(get_db), admin: Employee = Depends(require_super)):
     """Send (or save) today's summary right now, to check the setup."""
     recipients = settings_service.get(db, "hr_emails")
     try:
@@ -59,7 +59,7 @@ def list_backups():
 
 
 @router.post("/backups")
-def make_backup(db: Session = Depends(get_db), admin: Employee = Depends(require_admin)):
+def make_backup(db: Session = Depends(get_db), admin: Employee = Depends(require_super)):
     try:
         name = backup.backup_now()
     except RuntimeError as e:

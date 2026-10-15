@@ -64,6 +64,7 @@ class AttendanceOut(BaseModel):
     late_minutes: int = 0
     early_minutes: int = 0
     worked_minutes: Optional[int] = None
+    overtime_minutes: int = 0
 
 class AttendanceEdit(BaseModel):
     """Admin correction. Times are HH:MM on the record's own date; out_time "" clears it."""
@@ -79,6 +80,17 @@ class AttendanceCreate(BaseModel):
     reason: str = Field(min_length=3, max_length=500)
 
 # ---------- Settings ----------
+class Shift(BaseModel):
+    start: str = hhmm()
+    end: str = hhmm()
+
+    @field_validator("end")
+    @classmethod
+    def _after(cls, v, info):
+        if "start" in info.data and v <= info.data["start"]:
+            raise ValueError("shift must end after it starts")
+        return v
+
 class SettingsModel(BaseModel):
     company_name: str = Field(min_length=1, max_length=60)
     work_start: str = hhmm()
@@ -87,6 +99,8 @@ class SettingsModel(BaseModel):
     half_day_hours: float = Field(gt=0, le=12)
     weekend_days: list[int]
     min_checkout_minutes: int = Field(ge=0, le=240)
+    team_shifts: dict[Category, Shift] = {}
+    leave_allowance: dict[Literal["casual", "sick", "other"], int] = {"casual": 12, "sick": 7, "other": 0}
     hr_emails: list[EmailStr]
     email_enabled: bool
     email_time: str = hhmm()
@@ -192,5 +206,19 @@ class CheckInResponse(BaseModel):
     late_minutes: int = 0
     early_minutes: int = 0
     worked_minutes: Optional[int] = None
+    overtime_minutes: int = 0
     # Short-lived token for the "My attendance" page (this person only)
     self_token: Optional[str] = None
+
+# ---------- Notices ----------
+class NoticeIn(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    body: str = Field(default="", max_length=2000)
+    pinned: bool = False
+    expires_on: Optional[date] = None
+
+class NoticeOut(NoticeIn):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    created_at: datetime
+    created_by: str

@@ -29,7 +29,8 @@ def auto_checkout(db: Session, now: datetime | None = None) -> int:
                            AttendanceLog.date < now.date().isoformat())
                    .all())
     for l in open_logs:
-        end = datetime.combine(date.fromisoformat(l.date), rules.end)
+        team = l.employee.category if l.employee else None
+        end = datetime.combine(date.fromisoformat(l.date), rules.shift_for(team)[1])
         l.out_time = max(end, l.in_time)  # someone who came in after hours: zero-length day
         l.auto_checkout = True
         audit.record(db, None, "attendance.auto_checkout", employee_id=l.employee_id,

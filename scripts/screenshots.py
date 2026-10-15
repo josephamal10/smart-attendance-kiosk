@@ -38,7 +38,11 @@ SHOTS = {
     "profile":          "screen=profile&id={priya}",
     "my-attendance":    "screen=me",
     "settings-dark":    "screen=dashboard&page=settings&dark=1",
+    "notices":          "screen=dashboard&page=notices",
+    "admins":           "screen=dashboard&page=admins",
 }
+# Pages that scroll: capture them taller so the whole page is in one picture
+HEIGHT = {"my-attendance": 1340}
 
 
 def tokens() -> tuple[str, str, int]:
@@ -97,7 +101,7 @@ def main():
             url = f"http://localhost:{WEB_PORT}/?{query.format(priya=priya)}"
             out = os.path.join(OUT_PNG, f"{name}.png")
             subprocess.run([EDGE, "--headless=new", "--disable-gpu", "--hide-scrollbars",
-                            "--window-size=1440,900", "--force-device-scale-factor=1.5",
+                            f"--window-size=1440,{HEIGHT.get(name, 900)}", "--force-device-scale-factor=1.5",
                             "--virtual-time-budget=60000", "--run-all-compositor-stages-before-draw", f"--screenshot={out}", url],
                            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
             print(f"  {name}.png")

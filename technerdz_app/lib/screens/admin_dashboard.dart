@@ -10,14 +10,16 @@ import 'face_register_screen.dart';
 import 'admin/analytics_page.dart';
 import 'admin/attendance_edit_dialog.dart';
 import 'admin/audit_page.dart';
+import 'admin/admins_page.dart';
 import 'admin/holidays_page.dart';
+import 'admin/notices_page.dart';
 import 'admin/requests_page.dart';
 import 'admin/settings_page.dart';
 import 'admin/register_view.dart';
 import 'admin/employee_profile.dart';
 import '../theme/appearance.dart';
 
-enum _Page { overview, attendance, employees, requests, holidays, analytics, audit, settings }
+enum _Page { overview, attendance, employees, requests, holidays, notices, analytics, audit, admins, settings }
 
 extension on _Page {
   String get title => switch (this) {
@@ -26,8 +28,10 @@ extension on _Page {
         _Page.employees  => 'Employees',
         _Page.requests   => 'Requests',
         _Page.holidays   => 'Holidays',
+        _Page.notices    => 'Notice board',
         _Page.analytics  => 'Analytics',
         _Page.audit      => 'Audit log',
+        _Page.admins     => 'Admin accounts',
         _Page.settings   => 'Settings',
       };
   String get navLabel => this == _Page.attendance ? 'Attendance' : title;
@@ -37,8 +41,10 @@ extension on _Page {
         _Page.employees  => Icons.groups_outlined,
         _Page.requests   => Icons.inbox_outlined,
         _Page.holidays   => Icons.celebration_outlined,
+        _Page.notices    => Icons.campaign_outlined,
         _Page.analytics  => Icons.insights_outlined,
         _Page.audit      => Icons.history,
+        _Page.admins     => Icons.admin_panel_settings_outlined,
         _Page.settings   => Icons.settings_outlined,
       };
 }
@@ -46,7 +52,7 @@ extension on _Page {
 /// Sidebar groups
 const _navGroups = [
   ('WORKSPACE', [_Page.overview, _Page.attendance, _Page.employees]),
-  ('MANAGE', [_Page.requests, _Page.holidays]),
+  ('MANAGE', [_Page.requests, _Page.holidays, _Page.notices]),
   ('INSIGHTS', [_Page.analytics, _Page.audit]),
 ];
 
@@ -349,6 +355,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                   ),
                             _Page.requests   => RequestsPage(employees: _employees, onChanged: _loadData),
                             _Page.holidays   => HolidaysPage(onChanged: _loadData),
+                            _Page.notices    => const NoticesPage(),
+                            _Page.admins     => const AdminsPage(),
                             _Page.analytics  => const AnalyticsPage(),
                             _Page.audit      => AuditPage(employees: _employees),
                             _Page.settings   => const SettingsPage(),
@@ -396,11 +404,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
             ],
           ]),
         ),
+        if (ApiService.canEdit)
+          _NavItem(
+            icon: _Page.admins.icon,
+            label: 'Admin accounts',
+            selected: _page == _Page.admins,
+            onTap: () => _go(_Page.admins),
+          ),
         _NavItem(
           icon: _Page.settings.icon,
           label: 'Settings',
           selected: _page == _Page.settings,
-          onTap: () => setState(() => _page = _Page.settings),
+          onTap: () => _go(_Page.settings),
         ),
         ValueListenableBuilder<bool>(
           valueListenable: Appearance.dark,
@@ -421,7 +436,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(admin, overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-              Text('Administrator', style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
+              Text(ApiService.canEdit ? 'Super admin' : 'HR viewer · read-only',
+                  style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
             ]),
           ),
           PopupMenuButton<String>(
@@ -482,13 +498,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
           label: const Text('Export CSV'),
         ),
         const SizedBox(width: 12),
-        if (_page == _Page.attendance)
+        if (!ApiService.canEdit)
+          const StatusBadge('View only', tone: Tone.neutral)
+        else if (_page == _Page.attendance)
           ElevatedButton.icon(
             onPressed: _employees.isEmpty ? null : _addLog,
             icon: const Icon(Icons.add, size: 18),
             label: const Text('Add record'),
           )
-        else
+        else if (_page == _Page.overview || _page == _Page.employees)
           ElevatedButton.icon(
             onPressed: _categories.isEmpty ? null : _addEmployee,
             icon: const Icon(Icons.person_add_alt_1_outlined, size: 18),
@@ -654,9 +672,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 const StatusBadge('No check-out', tone: Tone.warning),
               FlagBadges(flags: l.flags, lateMinutes: l.lateMinutes, earlyMinutes: l.earlyMinutes,
                   whenClean: l.outTime != null ? const StatusBadge('Completed', tone: Tone.success) : null),
+              if (l.overtimeMinutes > 0)
+                StatusBadge('Overtime ${formatMinutes(l.overtimeMinutes)}', tone: Tone.primary),
             ]),
-            IconButton(tooltip: 'Correct this record', onPressed: () => _editLog(l),
-                icon: const Icon(Icons.edit_outlined, size: 18)),
+            ApiService.canEdit
+                ? IconButton(tooltip: 'Correct this record', onPressed: () => _editLog(l),
+                    icon: const Icon(Icons.edit_outlined, size: 18))
+                : const SizedBox.shrink(),
           ],
       ],
     );
@@ -889,13 +911,16 @@ class _EmployeesTableState extends State<_EmployeesTable> {
           ? StatusBadge('Registered · $faces photos', tone: Tone.success)
           : const StatusBadge('Not registered', tone: Tone.warning),
       Row(mainAxisSize: MainAxisSize.min, children: [
-        faces == 0
-            ? ElevatedButton.icon(
+        if (!ApiService.canRegisterFaces)
+          const SizedBox.shrink()
+        else if (faces == 0)
+          ElevatedButton.icon(
                 onPressed: () => widget.onRegister(e),
                 icon: const Icon(Icons.center_focus_strong_outlined, size: 18),
                 label: const Text('Register face'),
               )
-            : OutlinedButton(onPressed: () => widget.onReplace(e), child: const Text('Re-register')),
+        else
+          OutlinedButton(onPressed: () => widget.onReplace(e), child: const Text('Re-register')),
         PopupMenuButton<String>(
           tooltip: 'More',
           icon: Icon(Icons.more_vert, color: AppTheme.textSecondary),
@@ -909,10 +934,11 @@ class _EmployeesTableState extends State<_EmployeesTable> {
             const PopupMenuItem(value: 'profile', child: ListTile(
                 dense: true, contentPadding: EdgeInsets.zero,
                 leading: Icon(Icons.badge_outlined, size: 20), title: Text('View profile'))),
-            const PopupMenuItem(value: 'edit', child: ListTile(
-                dense: true, contentPadding: EdgeInsets.zero,
-                leading: Icon(Icons.edit_outlined, size: 20), title: Text('Edit details'))),
-            if (faces > 0) ...[
+            if (ApiService.canEdit)
+              const PopupMenuItem(value: 'edit', child: ListTile(
+                  dense: true, contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.edit_outlined, size: 20), title: Text('Edit details'))),
+            if (faces > 0 && ApiService.canRegisterFaces) ...[
               const PopupMenuItem(value: 'add', child: ListTile(
                   dense: true, contentPadding: EdgeInsets.zero,
                   leading: Icon(Icons.add_a_photo_outlined, size: 20), title: Text('Add more photos'))),

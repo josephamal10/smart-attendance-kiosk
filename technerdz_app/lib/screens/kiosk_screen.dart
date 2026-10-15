@@ -33,6 +33,8 @@ class _KioskScreenState extends State<KioskScreen> {
   bool _paused = false;   // someone is using My attendance: don't scan
   bool _dashboardMode = false; // "My dashboard" icon tapped: identify only, don't check in
   Timer? _modeTimer;            // drops back to normal check-in if nobody scans
+  List<Map<String, dynamic>> _notices = []; // company notices shown under the steps
+  Timer? _noticeTimer;
 
   _Phase _phase = _Phase.starting;
   String _sessionId = _newSessionId();
@@ -52,6 +54,8 @@ class _KioskScreenState extends State<KioskScreen> {
   @override
   void initState() {
     super.initState();
+    _loadNotices();
+    _noticeTimer = Timer.periodic(const Duration(minutes: 5), (_) => _loadNotices());
     if (widget.demoResult != null) {
       _phase = _Phase.result;
       _result = widget.demoResult;
@@ -64,6 +68,7 @@ class _KioskScreenState extends State<KioskScreen> {
   @override
   void dispose() {
     _modeTimer?.cancel();
+    _noticeTimer?.cancel();
     _running = false;
     _resultTimer?.cancel();
     _cam?.dispose();
@@ -74,6 +79,15 @@ class _KioskScreenState extends State<KioskScreen> {
 
   /// Build with --dart-define=NO_CAMERA=true for UI previews/screenshots without a webcam.
   static const _previewNoCamera = bool.fromEnvironment('NO_CAMERA');
+
+  Future<void> _loadNotices() async {
+    try {
+      final n = await ApiService.kioskNotices();
+      if (mounted) setState(() => _notices = n);
+    } catch (_) {
+      // Server unreachable: the scan loop already shows that; notices just stay as they were
+    }
+  }
 
   Future<void> _startCamera() async {
     setState(() { _noCamera = false; _phase = _Phase.starting; });
@@ -365,7 +379,15 @@ class _KioskScreenState extends State<KioskScreen> {
       StepRow(number: 3, title: "That's it",
           subtitle: _dashboardMode ? 'Your dashboard opens' : 'You are recognised and checked in or out',
           done: step > 3, active: step == 3),
-      const Spacer(),
+      // Notices take whatever room is left (scrolling if there's a lot) so the panel never overflows
+      Expanded(
+        child: _notices.isEmpty
+            ? const SizedBox.shrink()
+            : Padding(
+                padding: const EdgeInsets.only(top: 28, bottom: 12),
+                child: SingleChildScrollView(child: _noticesBox()),
+              ),
+      ),
       Row(children: [
         Icon(Icons.lock_outline, size: 15, color: AppTheme.textMuted),
         const SizedBox(width: 8),
@@ -374,6 +396,30 @@ class _KioskScreenState extends State<KioskScreen> {
       ]),
     ]);
   }
+
+  Widget _noticesBox() => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text('NOTICES', style: AppTheme.overline),
+        const SizedBox(height: 10),
+        for (final n in _notices.take(3))
+          Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: n['pinned'] == true ? AppTheme.primarySoft : AppTheme.surfaceMuted,
+              borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+            ),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Icon(n['pinned'] == true ? Icons.push_pin : Icons.campaign_outlined, size: 17, color: AppTheme.primary),
+              const SizedBox(width: 8),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(n['title'], style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                if ((n['body'] as String? ?? '').isNotEmpty)
+                  Text(n['body'], maxLines: 2, overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+              ])),
+            ]),
+          ),
+      ]);
 
   /// One line about today: "On time", "Late by 12 min", "Worked 8h 05m"...
   (String, Tone, IconData) _summary(Map<String, dynamic> r) {

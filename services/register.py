@@ -65,18 +65,20 @@ def build(db: Session, year: int, month: int, employee_ids: list[int] | None = N
     rows = []
     for e in employees:
         cells, totals = [], {s: 0 for s in STATUSES}
-        worked_minutes, late_minutes = 0, 0
+        worked_minutes, late_minutes, overtime_minutes = 0, 0, 0
         for day in days:
             log = logs.get((e.id, day.date.isoformat()))
             cell = {"status": "future"}
             if log and log.in_time:
-                ev = R.evaluate(log, rules)
+                ev = R.evaluate(log, rules, team=e.category)
                 status = "half_day" if "half_day" in ev.flags else "late" if "late" in ev.flags else "present"
                 cell = {"status": status, "in": log.in_time.strftime("%H:%M"),
                         "out": log.out_time.strftime("%H:%M") if log.out_time else None,
-                        "flags": ev.flags, "log_id": log.id}
+                        "flags": ev.flags, "log_id": log.id,
+                        "worked_minutes": ev.worked_minutes, "overtime_minutes": ev.overtime_minutes}
                 worked_minutes += ev.worked_minutes or 0
                 late_minutes += ev.late_minutes
+                overtime_minutes += ev.overtime_minutes
             elif day.holiday:
                 cell = {"status": "holiday", "name": day.holiday}
             elif not day.working:
@@ -97,7 +99,9 @@ def build(db: Session, year: int, month: int, employee_ids: list[int] | None = N
             "cells": cells, "totals": totals,
             "attendance_pct": round(attended / expected * 100, 1) if expected else None,
             "worked_hours": round(worked_minutes / 60, 1),
+            "overtime_hours": round(overtime_minutes / 60, 1),
             "late_minutes": late_minutes,
+            "shift": "–".join(t.strftime("%H:%M") for t in rules.shift_for(e.category)),
         })
 
     return {
@@ -138,7 +142,7 @@ def to_xlsx(data: dict, company: str) -> bytes:
     ws["A2"].font = Font(size=9, color="6B7280")
 
     header = ["Employee", "Team"] + [f"{d['day']}\n{d['weekday'][:2]}" for d in data["days"]] + \
-             ["Present", "Late", "Half day", "Absent", "Leave", "Hours", "Attendance %"]
+             ["Present", "Late", "Half day", "Absent", "Leave", "Hours", "Overtime h", "Attendance %"]
     for c, text in enumerate(header, start=1):
         cell = ws.cell(row=4, column=c, value=text)
         cell.font = Font(bold=True, size=9, color="374151")
@@ -158,7 +162,7 @@ def to_xlsx(data: dict, company: str) -> bytes:
             x.alignment, x.border, x.font = center, border, Font(size=9, bold=cell["status"] in ("absent", "late"))
         t = row["totals"]
         values = [t["present"], t["late"], t["half_day"], t["absent"], t["leave"], row["worked_hours"],
-                  row["attendance_pct"] if row["attendance_pct"] is not None else ""]
+                  row["overtime_hours"], row["attendance_pct"] if row["attendance_pct"] is not None else ""]
         for j, v in enumerate(values):
             x = ws.cell(row=r, column=3 + n_days + j, value=v)
             x.alignment, x.border = center, border
@@ -169,7 +173,7 @@ def to_xlsx(data: dict, company: str) -> bytes:
     ws.column_dimensions["B"].width = 16
     for i in range(n_days):
         ws.column_dimensions[get_column_letter(3 + i)].width = 4.2
-    for j in range(7):
+    for j in range(8):
         ws.column_dimensions[get_column_letter(3 + n_days + j)].width = 10
     ws.row_dimensions[4].height = 30
     ws.freeze_panes = "C5"

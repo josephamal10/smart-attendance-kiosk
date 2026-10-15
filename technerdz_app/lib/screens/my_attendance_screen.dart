@@ -114,7 +114,7 @@ class _MyAttendanceScreenState extends State<MyAttendanceScreen> {
           const SizedBox(width: 14),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('My attendance', style: AppTheme.overline),
+              Text('MY DASHBOARD', style: AppTheme.overline),
               const SizedBox(height: 2),
               Row(children: [
                 Flexible(child: Text(widget.name, style: AppTheme.h2, overflow: TextOverflow.ellipsis)),

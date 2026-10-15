@@ -4,6 +4,8 @@ Walk-up kiosk check-in. No login: the person's face *is* their identity.
     1. POST /kiosk/liveness  (frame, session_id)   repeat until live=true → liveness_token
     2. POST /kiosk/check-in  (frame, session_id, liveness_token)
          → anti-spoofing → 1:N face identification → IN / OUT
+    or POST /kiosk/identify  (same inputs) → who is this? → a pass for their own dashboard,
+         without touching attendance (the "My dashboard" icon on the kiosk)
 
 The session id is a random string the app makes per scan; the liveness token is bound
 to it and single-use, so a check-in always needs a fresh blink in front of the camera.
@@ -86,4 +88,31 @@ def check_in(
         # Lets this person open "My attendance" for a few minutes, no password needed
         self_token=create_access_token({"sub": str(employee.id), "type": "self"},
                                        expires=timedelta(minutes=3)),
+    )
+
+
+@router.post("/identify", response_model=CheckInResponse)
+def identify(
+    session_id: str = Form(...),
+    liveness_token: str = Form(...),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """Open someone's own dashboard by face. Same blink + anti-spoofing checks as check-in,
+    but no attendance is recorded."""
+    if not liveness_service.consume_token(liveness_token, _session(session_id)):
+        raise HTTPException(status_code=403, detail="Liveness check missing or expired. Please blink again.")
+
+    employee, msg = identify_face(db, file.file.read())
+    if not employee:
+        return CheckInResponse(recognized=False, message=msg)
+    return CheckInResponse(
+        recognized=True,
+        employee_id=employee.id,
+        name=employee.name,
+        category=employee.category,
+        message="Opening your dashboard",
+        greeting=f"{R.greeting(datetime.now())}, {employee.name.split()[0]}!",
+        self_token=create_access_token({"sub": str(employee.id), "type": "self"},
+                                       expires=timedelta(minutes=5)),
     )

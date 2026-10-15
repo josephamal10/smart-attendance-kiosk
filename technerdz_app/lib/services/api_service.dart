@@ -175,6 +175,13 @@ class ApiService {
         await _multipart('/kiosk/liveness', frame, {'session_id': sessionId}));
   }
 
+  /// Identify whoever is in [frame] for their own dashboard — no attendance is recorded.
+  static Future<Map<String, dynamic>> kioskIdentify(
+      File frame, String sessionId, String livenessToken) async {
+    return Map<String, dynamic>.from(await _multipart('/kiosk/identify', frame,
+        {'session_id': sessionId, 'liveness_token': livenessToken}));
+  }
+
   /// Identify whoever is in [frame] and record their IN / OUT.
   static Future<Map<String, dynamic>> kioskCheckIn(
       File frame, String sessionId, String livenessToken) async {

@@ -15,6 +15,7 @@ void main() {
     expect(find.text('HOW TO CHECK IN'), findsOneWidget);
     expect(find.text('Blink once'), findsOneWidget);
     expect(find.byTooltip('Admin sign-in'), findsOneWidget);
+    expect(find.byTooltip('My dashboard'), findsOneWidget);
     // No real camera in tests: the stage shows a status instead of crashing
     expect(find.textContaining('amera'), findsWidgets);
     await tester.binding.setSurfaceSize(null);
@@ -77,6 +78,20 @@ void main() {
     expect(find.text('Checked in'), findsOneWidget);
     expect(find.text('Late by 12 min'), findsOneWidget);
     expect(find.text('My attendance'), findsOneWidget);
+    await tester.binding.setSurfaceSize(null);
+  });
+
+  testWidgets('The My dashboard icon switches the kiosk to identify-only mode', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1366, 768));
+    await tester.pumpWidget(const MaterialApp(home: KioskScreen()));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.byTooltip('My dashboard'));
+    await tester.pump();
+    expect(find.text('HOW TO OPEN YOUR DASHBOARD'), findsOneWidget);
+    expect(find.textContaining('will not check you in'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pump();
+    expect(find.text('HOW TO CHECK IN'), findsOneWidget);
     await tester.binding.setSurfaceSize(null);
   });
 }

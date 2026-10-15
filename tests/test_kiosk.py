@@ -106,6 +106,24 @@ def test_disabled_employee_is_not_recognised(client, make_employee, kiosk):
     assert _check_in(client, _blink(client, kiosk)).json()["recognized"] is False
 
 
+def test_identify_opens_dashboard_without_checking_in(client, make_employee, kiosk, db_session):
+    kiosk["register"](make_employee("priya", category="HR"), seed=1)
+    kiosk["probe"] = _unit(1)
+    token = _blink(client, kiosk)
+    res = client.post("/kiosk/identify", data={"session_id": SID, "liveness_token": token}, files=_img()).json()
+    assert res["recognized"] and res["name"] == "Priya" and res["action"] is None
+    me = client.get("/me", headers={"Authorization": f"Bearer {res['self_token']}"})
+    assert me.status_code == 200
+    db = db_session()
+    assert db.query(AttendanceLog).count() == 0  # nothing recorded
+    db.close()
+
+
+def test_identify_needs_a_blink(client, kiosk):
+    res = client.post("/kiosk/identify", data={"session_id": SID, "liveness_token": "nope"}, files=_img())
+    assert res.status_code == 403
+
+
 def test_check_in_without_blink_is_refused(client, kiosk):
     assert _check_in(client, "made-up").status_code == 403
 

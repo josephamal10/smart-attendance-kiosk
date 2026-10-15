@@ -31,6 +31,8 @@ class _KioskScreenState extends State<KioskScreen> {
   bool _running = false;  // scan loop active
   bool _busy = false;     // a frame is being processed
   bool _paused = false;   // someone is using My attendance: don't scan
+  bool _dashboardMode = false; // "My dashboard" icon tapped: identify only, don't check in
+  Timer? _modeTimer;            // drops back to normal check-in if nobody scans
 
   _Phase _phase = _Phase.starting;
   String _sessionId = _newSessionId();
@@ -61,6 +63,7 @@ class _KioskScreenState extends State<KioskScreen> {
 
   @override
   void dispose() {
+    _modeTimer?.cancel();
     _running = false;
     _resultTimer?.cancel();
     _cam?.dispose();
@@ -151,11 +154,17 @@ class _KioskScreenState extends State<KioskScreen> {
       // Blinked: take a fresh photo and identify
       setState(() => _phase = _Phase.identifying);
       final photo = File((await _cam!.takePicture()).path);
-      final out = await ApiService.kioskCheckIn(photo, _sessionId, res['liveness_token'])
+      final openDashboard = _dashboardMode;
+      final out = await (openDashboard
+              ? ApiService.kioskIdentify(photo, _sessionId, res['liveness_token'])
+              : ApiService.kioskCheckIn(photo, _sessionId, res['liveness_token']))
           .timeout(const Duration(seconds: 15));
       if (!mounted || !_running) return Duration.zero;
       _sessionId = _newSessionId();
-      if (out['recognized'] == true) {
+      if (out['recognized'] == true && openDashboard) {
+        _setDashboardMode(false);
+        _openMyAttendance(out);
+      } else if (out['recognized'] == true) {
         _showResult(out);
       } else {
         setState(() { _phase = _Phase.waiting; _error = out['message']; });
@@ -206,6 +215,20 @@ class _KioskScreenState extends State<KioskScreen> {
     if (!mounted) return;
     _paused = false;
     _reset();
+  }
+
+  /// The "My dashboard" icon: the next scan opens that person's dashboard instead of
+  /// checking them in. Falls back to normal check-in after 30 s.
+  void _setDashboardMode(bool on) {
+    _modeTimer?.cancel();
+    if (!mounted) return;
+    setState(() {
+      _dashboardMode = on;
+      _error = null;
+      if (_phase == _Phase.result) _phase = _Phase.waiting;
+      _sessionId = _newSessionId();
+    });
+    if (on) _modeTimer = Timer(const Duration(seconds: 30), () => _setDashboardMode(false));
   }
 
   void _reset() {
@@ -261,9 +284,31 @@ class _KioskScreenState extends State<KioskScreen> {
                 child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))),
         _Phase.blink => const CameraPill('Now blink once',
             leading: Icon(Icons.visibility_outlined, color: Colors.white, size: 20)),
+        _ when _dashboardMode => CameraPill('Look at the camera to open your dashboard',
+            color: AppTheme.primary,
+            leading: const Icon(Icons.dashboard_outlined, color: Colors.white, size: 20)),
         _ => const CameraPill('Look at the camera to check in or out',
             leading: Icon(Icons.face_outlined, color: Colors.white, size: 20)),
       };
+
+  Widget _iconButton({required IconData icon, required String tooltip, required VoidCallback onTap,
+      bool active = false}) =>
+      Tooltip(
+        message: tooltip,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(10),
+          child: Container(
+            width: 36, height: 36,
+            decoration: BoxDecoration(
+              color: active ? AppTheme.primarySoft : null,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: active ? AppTheme.primary : AppTheme.border),
+            ),
+            child: Icon(icon, size: 19, color: active ? AppTheme.primary : AppTheme.textMuted),
+          ),
+        ),
+      );
 
   Widget _panel() {
     final step = switch (_phase) {
@@ -278,22 +323,15 @@ class _KioskScreenState extends State<KioskScreen> {
           child: Align(alignment: Alignment.centerLeft,
               child: FittedBox(fit: BoxFit.scaleDown, child: BrandMark(size: 34, subtitle: 'Attendance kiosk'))),
         ),
-        // The small, deliberately understated way in for admins
-        Tooltip(
-          message: 'Admin sign-in',
-          child: InkWell(
-            onTap: _openAdmin,
-            borderRadius: BorderRadius.circular(10),
-            child: Container(
-              width: 36, height: 36,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppTheme.border),
-              ),
-              child: Icon(Icons.admin_panel_settings_outlined, size: 19, color: AppTheme.textMuted),
-            ),
-          ),
+        // Small, understated ways in: employees' own dashboard (by face) and admin sign-in
+        _iconButton(
+          icon: Icons.person_outline,
+          tooltip: _dashboardMode ? 'Cancel — back to check-in' : 'My dashboard',
+          active: _dashboardMode,
+          onTap: () => _setDashboardMode(!_dashboardMode),
         ),
+        const SizedBox(width: 8),
+        _iconButton(icon: Icons.admin_panel_settings_outlined, tooltip: 'Admin sign-in', onTap: _openAdmin),
       ]),
       const SizedBox(height: 40),
       const Align(
@@ -303,7 +341,20 @@ class _KioskScreenState extends State<KioskScreen> {
       const SizedBox(height: 36),
       const Divider(),
       const SizedBox(height: 28),
-      Text('HOW TO CHECK IN', style: AppTheme.overline),
+      if (_dashboardMode) ...[
+        const InfoBanner('Opening your dashboard — this scan will not check you in or out.', tone: Tone.primary),
+        const SizedBox(height: 10),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () => _setDashboardMode(false),
+            icon: const Icon(Icons.close, size: 16),
+            label: const Text('Cancel'),
+          ),
+        ),
+        const SizedBox(height: 10),
+      ],
+      Text(_dashboardMode ? 'HOW TO OPEN YOUR DASHBOARD' : 'HOW TO CHECK IN', style: AppTheme.overline),
       const SizedBox(height: 18),
       StepRow(number: 1, title: 'Look at the camera',
           subtitle: 'Stand so your face fits the oval', done: step > 1, active: step == 1),
@@ -312,7 +363,8 @@ class _KioskScreenState extends State<KioskScreen> {
           subtitle: 'Shows a real person is there', done: step > 2, active: step == 2),
       const SizedBox(height: 18),
       StepRow(number: 3, title: "That's it",
-          subtitle: 'You are recognised and checked in or out', done: step > 3, active: step == 3),
+          subtitle: _dashboardMode ? 'Your dashboard opens' : 'You are recognised and checked in or out',
+          done: step > 3, active: step == 3),
       const Spacer(),
       Row(children: [
         Icon(Icons.lock_outline, size: 15, color: AppTheme.textMuted),

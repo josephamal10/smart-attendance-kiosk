@@ -110,6 +110,8 @@ def test_backups_are_pruned(tmp_path, monkeypatch):
     monkeypatch.setattr(backup, "KEEP", 2)
     (tmp_path / "b").mkdir()
     for i in range(4):  # pretend older backups exist
-        (tmp_path / "b" / f"technerdz-2020-01-0{i + 1}_000000.db").write_bytes(b"")
+        (tmp_path / "b" / f"live-2020-01-0{i + 1}_000000.db").write_bytes(b"")
+    (tmp_path / "b" / "demo-2020-01-01_000000.db").write_bytes(b"")  # another database's backup
     backup.backup_now(str(src))
-    assert len(list((tmp_path / "b").glob("technerdz-*.db"))) == 2
+    assert len(list((tmp_path / "b").glob("live-*.db"))) == 2
+    assert (tmp_path / "b" / "demo-2020-01-01_000000.db").exists()  # never touched

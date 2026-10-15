@@ -15,6 +15,8 @@ os.chdir(ROOT)
 sys.path.insert(0, ROOT)
 os.environ["DATABASE_URL"] = "sqlite:///./demo.db"
 os.environ.setdefault("CORS_ORIGINS", "http://localhost:5180,http://127.0.0.1:5180")
+# Demo data needs no auto check-outs, emails or backups (backups would mix with the real ones)
+os.environ["DISABLE_SCHEDULER"] = "1"
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="127.0.0.1", port=8001)

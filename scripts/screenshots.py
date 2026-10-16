@@ -27,6 +27,7 @@ FLUTTER = os.environ.get("FLUTTER", r"C:\flutter\flutter\bin\flutter.bat")
 WEB_PORT, API_PORT = 5181, 8001
 
 SHOTS = {
+    "lock":             "screen=lock",
     "kiosk":            "screen=kiosk",
     "admin-login":      "screen=login",
     "overview":         "screen=dashboard&page=overview",

@@ -6,32 +6,34 @@ import 'package:camera_windows/camera_windows.dart';
 import 'services/api_service.dart';
 import 'theme/app_theme.dart';
 import 'theme/appearance.dart';
+import 'theme/branding.dart';
 import 'screens/admin_login_screen.dart';
-import 'screens/kiosk_screen.dart';
+import 'screens/lock_screen.dart';
 
 // Global navigator key — used by ApiService for session expiry redirect
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
-/// Where the app starts and returns to: the face kiosk on the kiosk PC, admin sign-in in a
+/// Where the app starts and returns to: the clock lock screen on the kiosk PC, admin sign-in in a
 /// browser (the web build is the admin dashboard for HR's own computers — no camera there).
-Widget homeScreen() => kIsWeb ? const AdminLoginScreen() : const KioskScreen();
+Widget homeScreen() => kIsWeb ? const AdminLoginScreen() : const LockScreen();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Appearance.load();
+  unawaited(Branding.load()); // company name for the lock screen; doesn't block start-up
   // Native camera plugin only on Windows (the web build is used for UI previews/screenshots)
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) CameraWindows.registerWith();
-  runApp(const TechnerdzApp());
+  runApp(const AttendanceApp());
 }
 
-class TechnerdzApp extends StatefulWidget {
-  const TechnerdzApp({super.key});
+class AttendanceApp extends StatefulWidget {
+  const AttendanceApp({super.key});
 
   @override
-  State<TechnerdzApp> createState() => _TechnerdzAppState();
+  State<AttendanceApp> createState() => _AttendanceAppState();
 }
 
-class _TechnerdzAppState extends State<TechnerdzApp> {
+class _AttendanceAppState extends State<AttendanceApp> {
   @override
   void initState() {
     super.initState();
@@ -55,7 +57,7 @@ class _TechnerdzAppState extends State<TechnerdzApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'TECHNERDZ Attendance',
+      title: 'NanoNino Attendance',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.theme,
       navigatorKey: navigatorKey,

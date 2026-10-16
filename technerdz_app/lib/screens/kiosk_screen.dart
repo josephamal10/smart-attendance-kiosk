@@ -9,16 +9,18 @@ import '../theme/app_theme.dart';
 import '../widgets/camera_stage.dart';
 import '../widgets/clock_widget.dart';
 import '../widgets/ui.dart';
-import 'admin_login_screen.dart';
 import 'my_attendance_screen.dart';
 
-/// The screen the app opens on. Anyone can walk up, look at the camera and blink;
-/// the server recognises them and records IN / OUT. No names, no passwords.
-/// A small icon in the corner leads admins to their sign-in.
+/// The camera screen, opened from the lock screen with a tap. Look at the camera and blink;
+/// the server recognises you and records IN / OUT. No names, no passwords.
+/// Goes back to the lock screen by itself once the scan is done or nobody is in front of it.
 class KioskScreen extends StatefulWidget {
   /// Shows this check-in result without a camera (widget tests and the screenshot tool).
   final Map<String, dynamic>? demoResult;
-  const KioskScreen({super.key, this.demoResult});
+  /// Opened with the lock screen's "My dashboard" icon: the scan opens that person's own
+  /// dashboard and does not check them in or out.
+  final bool dashboardMode;
+  const KioskScreen({super.key, this.demoResult, this.dashboardMode = false});
   @override
   State<KioskScreen> createState() => _KioskScreenState();
 }
@@ -31,10 +33,9 @@ class _KioskScreenState extends State<KioskScreen> {
   bool _running = false;  // scan loop active
   bool _busy = false;     // a frame is being processed
   bool _paused = false;   // someone is using My attendance: don't scan
-  bool _dashboardMode = false; // "My dashboard" icon tapped: identify only, don't check in
-  Timer? _modeTimer;            // drops back to normal check-in if nobody scans
-  List<Map<String, dynamic>> _notices = []; // company notices shown under the steps
-  Timer? _noticeTimer;
+  late final bool _dashboardMode = widget.dashboardMode;
+  Timer? _idleTimer;      // back to the lock screen when nobody is in front of the camera
+  bool _leaving = false;
 
   _Phase _phase = _Phase.starting;
   String _sessionId = _newSessionId();
@@ -43,7 +44,8 @@ class _KioskScreenState extends State<KioskScreen> {
   Timer? _resultTimer;
   int _resultCountdown = 0;
 
-  static const _resultSeconds = 8; // long enough to tap "My attendance"
+  static const _resultSeconds = 8; // long enough to tap "My dashboard"
+  static const _idleTimeout = Duration(seconds: 30);
 
   static String _newSessionId() {
     const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -54,8 +56,6 @@ class _KioskScreenState extends State<KioskScreen> {
   @override
   void initState() {
     super.initState();
-    _loadNotices();
-    _noticeTimer = Timer.periodic(const Duration(minutes: 5), (_) => _loadNotices());
     if (widget.demoResult != null) {
       _phase = _Phase.result;
       _result = widget.demoResult;
@@ -63,12 +63,12 @@ class _KioskScreenState extends State<KioskScreen> {
       return;
     }
     _startCamera();
+    _bumpIdle();
   }
 
   @override
   void dispose() {
-    _modeTimer?.cancel();
-    _noticeTimer?.cancel();
+    _idleTimer?.cancel();
     _running = false;
     _resultTimer?.cancel();
     _cam?.dispose();
@@ -80,12 +80,27 @@ class _KioskScreenState extends State<KioskScreen> {
   /// Build with --dart-define=NO_CAMERA=true for UI previews/screenshots without a webcam.
   static const _previewNoCamera = bool.fromEnvironment('NO_CAMERA');
 
-  Future<void> _loadNotices() async {
-    try {
-      final n = await ApiService.kioskNotices();
-      if (mounted) setState(() => _notices = n);
-    } catch (_) {
-      // Server unreachable: the scan loop already shows that; notices just stay as they were
+  /// Someone is (still) here: restart the countdown back to the lock screen.
+  void _bumpIdle() {
+    _idleTimer?.cancel();
+    _idleTimer = Timer(_idleTimeout, () {
+      if (mounted && !_paused && _phase != _Phase.result) _leave();
+    });
+  }
+
+  /// Back to the lock screen, releasing the camera first so the next scan can open it.
+  Future<void> _leave() async {
+    if (_leaving || !mounted) return;
+    _leaving = true;
+    _idleTimer?.cancel();
+    await _stopCamera();
+    if (!mounted) return;
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    } else {
+      _leaving = false; // opened as the home screen (tests): just start over
+      _reset();
+      _startCamera();
     }
   }
 
@@ -117,16 +132,6 @@ class _KioskScreenState extends State<KioskScreen> {
     await cam?.dispose();
   }
 
-  Future<void> _openAdmin() async {
-    // Free the camera: the admin may open face registration, which needs it
-    await _stopCamera();
-    if (!mounted) return;
-    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminLoginScreen()));
-    if (!mounted) return;
-    _reset();
-    _startCamera();
-  }
-
   // ── Scan loop ────────────────────────────────────────────
 
   /// Self-scheduling loop: quick polling while a face is in view, slower when nobody's there.
@@ -151,6 +156,7 @@ class _KioskScreenState extends State<KioskScreen> {
       final res = await ApiService.kioskLiveness(frame, _sessionId);
       if (!mounted || !_running) return Duration.zero;
 
+      if (res['face_found'] == true) _bumpIdle();
       if (res['face_found'] != true) {
         // Nobody (or more than one person) in front of the camera
         final msg = res['message'] as String?;
@@ -176,7 +182,6 @@ class _KioskScreenState extends State<KioskScreen> {
       if (!mounted || !_running) return Duration.zero;
       _sessionId = _newSessionId();
       if (out['recognized'] == true && openDashboard) {
-        _setDashboardMode(false);
         _openMyAttendance(out);
       } else if (out['recognized'] == true) {
         _showResult(out);
@@ -211,7 +216,7 @@ class _KioskScreenState extends State<KioskScreen> {
       if (!mounted) { t.cancel(); return; }
       if (_resultCountdown <= 1) {
         t.cancel();
-        _reset();
+        _leave();
       } else {
         setState(() => _resultCountdown--);
       }
@@ -228,21 +233,7 @@ class _KioskScreenState extends State<KioskScreen> {
         builder: (_) => MyAttendanceScreen(token: token, name: r['name'] ?? '', category: r['category'])));
     if (!mounted) return;
     _paused = false;
-    _reset();
-  }
-
-  /// The "My dashboard" icon: the next scan opens that person's dashboard instead of
-  /// checking them in. Falls back to normal check-in after 30 s.
-  void _setDashboardMode(bool on) {
-    _modeTimer?.cancel();
-    if (!mounted) return;
-    setState(() {
-      _dashboardMode = on;
-      _error = null;
-      if (_phase == _Phase.result) _phase = _Phase.waiting;
-      _sessionId = _newSessionId();
-    });
-    if (on) _modeTimer = Timer(const Duration(seconds: 30), () => _setDashboardMode(false));
+    _leave(); // their dashboard closed: back to the lock screen for the next person
   }
 
   void _reset() {
@@ -280,7 +271,7 @@ class _KioskScreenState extends State<KioskScreen> {
                     leading: const Icon(Icons.error_outline, color: Colors.white, size: 18))
                 : _noCamera
                     ? OutlinedButton.icon(
-                        onPressed: _startCamera,
+                        onPressed: () { _bumpIdle(); _startCamera(); },
                         icon: const Icon(Icons.refresh, size: 18),
                         label: const Text('Try again'),
                       )
@@ -305,25 +296,6 @@ class _KioskScreenState extends State<KioskScreen> {
             leading: Icon(Icons.face_outlined, color: Colors.white, size: 20)),
       };
 
-  Widget _iconButton({required IconData icon, required String tooltip, required VoidCallback onTap,
-      bool active = false}) =>
-      Tooltip(
-        message: tooltip,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(10),
-          child: Container(
-            width: 36, height: 36,
-            decoration: BoxDecoration(
-              color: active ? AppTheme.primarySoft : null,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: active ? AppTheme.primary : AppTheme.border),
-            ),
-            child: Icon(icon, size: 19, color: active ? AppTheme.primary : AppTheme.textMuted),
-          ),
-        ),
-      );
-
   Widget _panel() {
     final step = switch (_phase) {
       _Phase.blink => 2,
@@ -337,15 +309,14 @@ class _KioskScreenState extends State<KioskScreen> {
           child: Align(alignment: Alignment.centerLeft,
               child: FittedBox(fit: BoxFit.scaleDown, child: BrandMark(size: 34, subtitle: 'Attendance kiosk'))),
         ),
-        // Small, understated ways in: employees' own dashboard (by face) and admin sign-in
-        _iconButton(
-          icon: Icons.person_outline,
-          tooltip: _dashboardMode ? 'Cancel — back to check-in' : 'My dashboard',
-          active: _dashboardMode,
-          onTap: () => _setDashboardMode(!_dashboardMode),
+        Tooltip(
+          message: 'Back to the home screen',
+          child: OutlinedButton.icon(
+            onPressed: _leave,
+            icon: const Icon(Icons.arrow_back_rounded, size: 18),
+            label: const Text('Back'),
+          ),
         ),
-        const SizedBox(width: 8),
-        _iconButton(icon: Icons.admin_panel_settings_outlined, tooltip: 'Admin sign-in', onTap: _openAdmin),
       ]),
       const SizedBox(height: 40),
       const Align(
@@ -357,16 +328,7 @@ class _KioskScreenState extends State<KioskScreen> {
       const SizedBox(height: 28),
       if (_dashboardMode) ...[
         const InfoBanner('Opening your dashboard — this scan will not check you in or out.', tone: Tone.primary),
-        const SizedBox(height: 10),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton.icon(
-            onPressed: () => _setDashboardMode(false),
-            icon: const Icon(Icons.close, size: 16),
-            label: const Text('Cancel'),
-          ),
-        ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 20),
       ],
       Text(_dashboardMode ? 'HOW TO OPEN YOUR DASHBOARD' : 'HOW TO CHECK IN', style: AppTheme.overline),
       const SizedBox(height: 18),
@@ -379,15 +341,7 @@ class _KioskScreenState extends State<KioskScreen> {
       StepRow(number: 3, title: "That's it",
           subtitle: _dashboardMode ? 'Your dashboard opens' : 'You are recognised and checked in or out',
           done: step > 3, active: step == 3),
-      // Notices take whatever room is left (scrolling if there's a lot) so the panel never overflows
-      Expanded(
-        child: _notices.isEmpty
-            ? const SizedBox.shrink()
-            : Padding(
-                padding: const EdgeInsets.only(top: 28, bottom: 12),
-                child: SingleChildScrollView(child: _noticesBox()),
-              ),
-      ),
+      const Spacer(),
       Row(children: [
         Icon(Icons.lock_outline, size: 15, color: AppTheme.textMuted),
         const SizedBox(width: 8),
@@ -396,30 +350,6 @@ class _KioskScreenState extends State<KioskScreen> {
       ]),
     ]);
   }
-
-  Widget _noticesBox() => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text('NOTICES', style: AppTheme.overline),
-        const SizedBox(height: 10),
-        for (final n in _notices.take(3))
-          Container(
-            margin: const EdgeInsets.only(bottom: 8),
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: n['pinned'] == true ? AppTheme.primarySoft : AppTheme.surfaceMuted,
-              borderRadius: BorderRadius.circular(AppTheme.radiusSm),
-            ),
-            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Icon(n['pinned'] == true ? Icons.push_pin : Icons.campaign_outlined, size: 17, color: AppTheme.primary),
-              const SizedBox(width: 8),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(n['title'], style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                if ((n['body'] as String? ?? '').isNotEmpty)
-                  Text(n['body'], maxLines: 2, overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
-              ])),
-            ]),
-          ),
-      ]);
 
   /// One line about today: "On time", "Late by 12 min", "Worked 8h 05m"...
   (String, Tone, IconData) _summary(Map<String, dynamic> r) {
@@ -504,11 +434,11 @@ class _KioskScreenState extends State<KioskScreen> {
             child: OutlinedButton.icon(
               onPressed: () => _openMyAttendance(r),
               icon: const Icon(Icons.calendar_month_outlined, size: 18),
-              label: const Text('My attendance'),
+              label: const Text('My dashboard'),
             ),
           ),
         const SizedBox(height: 12),
-        Text('Next person in $_resultCountdown s',
+        Text('Back to the home screen in $_resultCountdown s',
             style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
       ]),
     );

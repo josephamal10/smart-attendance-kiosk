@@ -1,4 +1,4 @@
-# TECHNERDZ — Face Recognition Attendance Kiosk
+# NanoNino Attendance — Face Recognition Kiosk
 
 A desktop kiosk where employees check in and out by looking at a camera.
 **FastAPI** backend + **Flutter (Windows)** frontend, with face recognition
@@ -7,17 +7,19 @@ anti-spoofing CNN served with ONNX Runtime** ([ml/antispoof](ml/antispoof/README
 an admin dashboard (desktop and **web**) and a personal dashboard for every employee.
 
 
-| Walk-up kiosk | Admin overview |
+| Lock screen (tap anywhere to check in) | Camera check-in |
 |---|---|
-| ![Kiosk check-in](docs/screenshots/kiosk.png) | ![Overview](docs/screenshots/overview.png) |
+| ![Lock screen](docs/screenshots/lock.png) | ![Kiosk check-in](docs/screenshots/kiosk.png) |
+| **Admin overview** | **Notice board** (shown on the lock screen) |
+| ![Overview](docs/screenshots/overview.png) | ![Notice board](docs/screenshots/notices.png) |
 | **Monthly register** (exports to Excel) | **Employee profile** |
 | ![Monthly register](docs/screenshots/register.png) | ![Employee profile](docs/screenshots/profile.png) |
 | **Analytics** | **Dark mode** |
 | ![Analytics](docs/screenshots/analytics.png) | ![Analytics, dark](docs/screenshots/analytics-dark.png) |
-| **Requests** | **Notice board** (shown on the kiosk) |
-| ![Requests](docs/screenshots/requests.png) | ![Notice board](docs/screenshots/notices.png) |
-| **Admin accounts** (super admin / read-only HR viewer) | **Settings** with per-team shifts |
-| ![Admin accounts](docs/screenshots/admins.png) | ![Settings, dark](docs/screenshots/settings-dark.png) |
+| **Requests** | **Admin accounts** (super admin / read-only HR viewer) |
+| ![Requests](docs/screenshots/requests.png) | ![Admin accounts](docs/screenshots/admins.png) |
+| **Settings** with per-team shifts | |
+| ![Settings, dark](docs/screenshots/settings-dark.png) | |
 
 **My dashboard** — each employee's own page, opened at the kiosk by face (no password):
 
@@ -42,7 +44,12 @@ an admin dashboard (desktop and **web**) and a personal dashboard for every empl
 ```
 
 ## How a check-in works
-Employees have **no username or password** — they walk up, look at the camera and blink.
+When idle the kiosk shows a **lock screen**: a big clock, the date and company notices, with the
+camera off. **Tap anywhere** to open the camera; it goes back to the lock screen by itself after the
+scan (or 30 s with nobody in front of it). Two icons in the corner open **My dashboard** (by face)
+and **Admin sign-in**. The company name comes from Settings, so the kiosk shows whatever you call it.
+
+Employees have **no username or password** — they tap, look at the camera and blink.
 1. The kiosk streams frames to `/kiosk/liveness` under a random per-scan session id. The server
    computes the **Eye Aspect Ratio** from 478 face landmarks and waits for open → closed eyes.
 2. On a blink it issues a **single-use liveness token** (60 s, bound to that scan session).

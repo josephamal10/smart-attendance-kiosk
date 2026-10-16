@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
+import '../theme/branding.dart';
 import '../services/api_service.dart';
 import '../widgets/ui.dart';
 import 'admin_dashboard.dart';
@@ -210,7 +211,11 @@ class _BrandPanel extends StatelessWidget {
                 ]),
               )),
           const Spacer(),
-          Text('© TECHNERDZ', style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 12)),
+          ValueListenableBuilder<String>(
+            valueListenable: Branding.name,
+            builder: (_, name, __) => Text('© $name',
+                style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 12)),
+          ),
         ]),
       ]),
     );

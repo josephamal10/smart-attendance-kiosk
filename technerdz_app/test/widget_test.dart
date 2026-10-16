@@ -4,22 +4,55 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:technerdz_app/models/employee.dart';
 import 'package:technerdz_app/screens/admin_login_screen.dart';
 import 'package:technerdz_app/screens/kiosk_screen.dart';
+import 'package:technerdz_app/screens/lock_screen.dart';
 import 'package:technerdz_app/screens/my_attendance_screen.dart';
 import 'package:technerdz_app/services/api_service.dart';
 import 'package:technerdz_app/widgets/ui.dart';
 
 void main() {
-  testWidgets('Kiosk opens on check-in instructions with a small admin entry', (tester) async {
+  testWidgets('Lock screen shows the clock, the company and both corner icons', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1366, 768));
-    await tester.pumpWidget(const MaterialApp(home: KioskScreen()));
-    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pumpWidget(const MaterialApp(home: LockScreen()));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('Tap anywhere to check in or out'), findsOneWidget);
+    expect(find.text('NANONINO'), findsOneWidget);
+    expect(find.byTooltip('Admin sign-in'), findsOneWidget);
+    expect(find.textContaining('My dashboard'), findsOneWidget);
+    expect(find.text('HOW TO CHECK IN'), findsNothing); // camera not open yet
+    await tester.binding.setSurfaceSize(null);
+  });
+
+  testWidgets('Tapping anywhere on the lock screen opens the camera, Back returns', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1366, 768));
+    await tester.pumpWidget(const MaterialApp(home: LockScreen()));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tapAt(const Offset(300, 500));
+    await tester.pump(); // first frame of the page transition
+    await tester.pump(const Duration(milliseconds: 600));
 
     expect(find.text('HOW TO CHECK IN'), findsOneWidget);
     expect(find.text('Blink once'), findsOneWidget);
-    expect(find.byTooltip('Admin sign-in'), findsOneWidget);
-    expect(find.byTooltip('My dashboard'), findsOneWidget);
     // No real camera in tests: the stage shows a status instead of crashing
     expect(find.textContaining('amera'), findsWidgets);
+
+    await tester.tap(find.text('Back'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+    expect(find.text('Tap anywhere to check in or out'), findsOneWidget);
+    expect(find.text('HOW TO CHECK IN'), findsNothing);
+    await tester.binding.setSurfaceSize(null);
+  });
+
+  testWidgets('The My dashboard icon opens the camera in identify-only mode', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1366, 768));
+    await tester.pumpWidget(const MaterialApp(home: LockScreen()));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('My dashboard'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+    expect(find.text('HOW TO OPEN YOUR DASHBOARD'), findsOneWidget);
+    expect(find.textContaining('will not check you in'), findsOneWidget);
     await tester.binding.setSurfaceSize(null);
   });
 
@@ -79,21 +112,7 @@ void main() {
     expect(find.text('Good morning, Priya!'), findsOneWidget);
     expect(find.text('Checked in'), findsOneWidget);
     expect(find.text('Late by 12 min'), findsOneWidget);
-    expect(find.text('My attendance'), findsOneWidget);
-    await tester.binding.setSurfaceSize(null);
-  });
-
-  testWidgets('The My dashboard icon switches the kiosk to identify-only mode', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(1366, 768));
-    await tester.pumpWidget(const MaterialApp(home: KioskScreen()));
-    await tester.pump(const Duration(milliseconds: 300));
-    await tester.tap(find.byTooltip('My dashboard'));
-    await tester.pump();
-    expect(find.text('HOW TO OPEN YOUR DASHBOARD'), findsOneWidget);
-    expect(find.textContaining('will not check you in'), findsOneWidget);
-    await tester.tap(find.text('Cancel'));
-    await tester.pump();
-    expect(find.text('HOW TO CHECK IN'), findsOneWidget);
+    expect(find.text('My dashboard'), findsOneWidget);
     await tester.binding.setSurfaceSize(null);
   });
 

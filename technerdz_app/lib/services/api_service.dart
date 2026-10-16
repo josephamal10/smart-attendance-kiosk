@@ -391,6 +391,12 @@ class ApiService {
         _uri('/me/report-link', {'year': '${month.year}', 'month': '${month.month}'}), headers: _self(token))));
   }
 
+  /// The company name from the server's settings (public: shown before anyone signs in).
+  static Future<String> companyName() async {
+    final res = await http.get(_uri('/kiosk/info')).timeout(const Duration(seconds: 8));
+    return (_handleSelf(res) as Map)['company_name'] as String;
+  }
+
   // ── Notices ──────────────────────────────────────────
   /// Current notices for the kiosk lock screen (no sign-in needed).
   static Future<List<Map<String, dynamic>>> kioskNotices() async {

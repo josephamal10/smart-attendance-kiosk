@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from models import Setting
 
 DEFAULTS: dict[str, Any] = {
-    "company_name":         "TECHNERDZ",
+    "company_name":         "NanoNino",
     "work_start":           "09:00",
     "work_end":             "18:00",
     "grace_minutes":        15,       # check-in later than start + grace = Late

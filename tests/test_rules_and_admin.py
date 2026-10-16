@@ -207,7 +207,7 @@ def test_approved_leave_reduces_expected_days(client, make_employee, login, db_s
 # ── Settings ─────────────────────────────────────────────────────────────────
 
 def _settings(**kw):
-    base = {"company_name": "TECHNERDZ", "work_start": "09:00", "work_end": "18:00", "grace_minutes": 15,
+    base = {"company_name": "NanoNino", "work_start": "09:00", "work_end": "18:00", "grace_minutes": 15,
             "half_day_hours": 4, "weekend_days": [5, 6], "min_checkout_minutes": 5,
             "hr_emails": ["hr@example.com"], "email_enabled": True, "email_time": "19:00"}
     base.update(kw)

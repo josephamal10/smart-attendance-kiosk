@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
+import '../theme/branding.dart';
 
 /// Small shared building blocks so every screen looks like the same product.
 
@@ -44,7 +45,14 @@ class BrandMark extends StatelessWidget {
         color: onDark ? Colors.white.withValues(alpha: 0.14) : null,
         border: onDark ? Border.all(color: Colors.white.withValues(alpha: 0.25)) : null,
       ),
-      child: Icon(Icons.face_retouching_natural, color: Colors.white, size: size * 0.56),
+      // Monogram of the company name, e.g. "N" for NanoNino
+      child: Center(
+        child: ValueListenableBuilder<String>(
+          valueListenable: Branding.name,
+          builder: (_, name, __) => Text(name.isEmpty ? '?' : name[0].toUpperCase(),
+              style: TextStyle(color: Colors.white, fontSize: size * 0.52, fontWeight: FontWeight.w700, height: 1)),
+        ),
+      ),
     );
     if (!showName) return tile;
     final nameColor = onDark ? Colors.white : AppTheme.textPrimary;
@@ -53,8 +61,11 @@ class BrandMark extends StatelessWidget {
       tile,
       const SizedBox(width: 12),
       Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-        Text('TECHNERDZ', style: TextStyle(
-            fontSize: size * 0.4, fontWeight: FontWeight.w700, letterSpacing: 1.2, color: nameColor)),
+        ValueListenableBuilder<String>(
+          valueListenable: Branding.name,
+          builder: (_, name, __) => Text(name.toUpperCase(), style: TextStyle(
+              fontSize: size * 0.4, fontWeight: FontWeight.w700, letterSpacing: 1.2, color: nameColor)),
+        ),
         if (subtitle != null)
           Text(subtitle!, style: TextStyle(fontSize: 12, color: subColor, fontWeight: FontWeight.w500)),
       ]),

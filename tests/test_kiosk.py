@@ -214,3 +214,12 @@ def test_ear_uses_pixel_coordinates():
     px = [(300, 240), (313, 234), (327, 234), (340, 240), (327, 246), (313, 246)]
     lm = {i: _P(x / W, y / H) for i, (x, y) in enumerate(px)}
     assert _ear(lm, list(range(6)), W, H) == pytest.approx(12 / 40, rel=1e-6)
+
+
+def test_lock_screen_gets_the_company_name_without_signing_in(client, make_employee, login):
+    assert client.get("/kiosk/info").json() == {"company_name": "NanoNino"}
+    make_employee("boss", role="admin")
+    s = client.get("/admin/settings", headers=login("boss")).json()
+    s.pop("smtp_configured", None)
+    client.put("/admin/settings", headers=login("boss"), json={**s, "company_name": "NANONINO"})
+    assert client.get("/kiosk/info").json() == {"company_name": "NANONINO"}

@@ -23,6 +23,7 @@ from schemas import CheckInResponse, LivenessResponse
 from services import liveness_service, rules as R
 from services.attendance_service import mark_attendance
 from services.face_service import identify_face, measure_ear
+from services.settings_service import get as get_setting
 
 router = APIRouter(prefix="/kiosk", tags=["Kiosk"])
 
@@ -33,6 +34,12 @@ def _session(session_id: str) -> str:
     if not _SESSION_RE.match(session_id):
         raise HTTPException(status_code=422, detail="Invalid session id")
     return session_id
+
+
+@router.get("/info")
+def kiosk_info(db: Session = Depends(get_db)):
+    """What the lock screen shows before anyone signs in: just the company name."""
+    return {"company_name": get_setting(db, "company_name")}
 
 
 @router.post("/liveness", response_model=LivenessResponse)

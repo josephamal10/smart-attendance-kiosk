@@ -6,6 +6,10 @@ A desktop kiosk where employees check in and out by looking at a camera.
 anti-spoofing CNN served with ONNX Runtime** ([ml/antispoof](ml/antispoof/README.md))
 an admin dashboard (desktop and **web**) and a personal dashboard for every employee.
 
+![NanoNino tour: lock screen, Tamil, check-in, My dashboard, admin console](docs/demo.gif)
+
+<sub>A 30-second tour made from the screenshots below (`python scripts/make_demo_gif.py`).</sub>
+
 
 | Lock screen (tap anywhere to check in) | Camera check-in |
 |---|---|

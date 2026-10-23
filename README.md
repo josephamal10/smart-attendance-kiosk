@@ -98,11 +98,18 @@ windows (each restarts itself if it crashes), waits until they're ready, then op
 `powershell -ExecutionPolicy Bypass -File scripts\install_autostart.ps1` (`-Remove` undoes it).
 
 **Web dashboard** (for HR on their own computers): run `scripts\build_web.bat` once, restart the
-server, then open `http://<kiosk-pc-ip>:8000/app/` in a browser and sign in with an admin account.
+server, then open `https://<kiosk-pc-ip>:8443/app/` in a browser and sign in with an admin account.
 It's the same Flutter app compiled for the web, served by the API server itself, so there's no CORS
 or separate hosting. Face registration stays on the kiosk PC (it needs the camera).
-`run.bat` listens on the office network (`HOST=0.0.0.0`) so browsers and phones can reach it; set
-`HOST=127.0.0.1` in it to keep everything on the kiosk PC.
+
+Two servers, one codebase: the kiosk app uses **plain HTTP on 127.0.0.1:8000** (never leaves the
+PC, runs the daily jobs); the office network gets **HTTPS on port 8443** with a self-signed
+certificate that `scripts/make_cert.py` makes (and renews when the PC's address changes). Browsers
+warn once because the certificate isn't from a public authority — expected on a local network.
+Set `LAN=0` in `run.bat` to keep everything on the kiosk PC.
+
+**Database changes** are Alembic migrations in `migrations/`; the app applies them on start-up.
+After changing `models.py`: `alembic revision --autogenerate -m "..."`, review the file, restart.
 
 **Backend with Docker** (any OS):
 ```bash
@@ -118,7 +125,7 @@ pip install -r requirements-dev.txt
 copy .env.example .env          # then set SECRET_KEY
 python scripts/create_admin.py --username admin --name "Admin"
 uvicorn main:app --reload       # API docs at http://127.0.0.1:8000/docs
-pytest                          # 118 tests, no camera needed
+pytest                          # 123 tests, no camera needed
 ```
 
 **App** (Flutter, Windows desktop):
@@ -136,8 +143,8 @@ flutter run -d windows --dart-define=API_URL=http://<server-ip>:8000
   10-minute `report` (one person's PDF, for the QR link). Each endpoint accepts only its own type.
 - HR viewer accounts are read-only on the server: every write endpoint requires a super admin, and
   the last active super admin can't be demoted or disabled.
-- On the office network the server speaks plain HTTP. Put it behind HTTPS (e.g. a reverse proxy)
-  before using the web dashboard over Wi-Fi you don't trust.
+- Other devices only ever reach the HTTPS server (passwords and reports are encrypted on the
+  Wi-Fi); the plain-HTTP server listens on 127.0.0.1 only.
 - Employees have no password at all (`!` placeholder that can never match), so their accounts
   can't be used to sign in.
 - Login lockout is per (username, IP) so one machine can't lock someone out everywhere.

@@ -26,3 +26,6 @@ docker-data/
 models/face/*.onnx
 demo.db
 backups/
+
+# HTTPS certificate made on this PC by scripts/make_cert.py
+certs/

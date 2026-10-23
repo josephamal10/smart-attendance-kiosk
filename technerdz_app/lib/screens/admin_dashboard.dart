@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:io' show exit;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../theme/app_theme.dart';
 import '../services/api_service.dart';
+import '../services/kiosk_mode.dart';
 import '../models/employee.dart';
 import '../widgets/clock_widget.dart';
 import '../widgets/ui.dart';
@@ -232,6 +234,17 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
   }
 
+  /// Kiosk mode has no title bar to close the app with; super admins can close it here.
+  Future<void> _closeKioskApp() async {
+    final ok = await _confirm(
+      title: 'Close the kiosk app?',
+      message: 'Nobody can check in until it is started again (run.bat, or restart the PC '
+          'if it starts automatically).',
+      action: 'Close app',
+    );
+    if (ok) exit(0);
+  }
+
   Future<void> _changePassword() async {
     final ok = await showDialog<bool>(context: context, builder: (_) => const _ChangePasswordDialog());
     if (ok == true && mounted) _toast('Password changed. Use it next time you sign in.');
@@ -443,14 +456,23 @@ class _AdminDashboardState extends State<AdminDashboard> {
           PopupMenuButton<String>(
             tooltip: 'Account',
             icon: const Icon(Icons.more_vert, size: 20),
-            onSelected: (v) => v == 'password' ? _changePassword() : _logout(),
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'password', child: ListTile(
+            onSelected: (v) => switch (v) {
+              'password' => _changePassword(),
+              'exit' => _closeKioskApp(),
+              _ => _logout(),
+            },
+            itemBuilder: (_) => [
+              const PopupMenuItem(value: 'password', child: ListTile(
                   dense: true, contentPadding: EdgeInsets.zero,
                   leading: Icon(Icons.key_outlined, size: 20), title: Text('Change password'))),
-              PopupMenuItem(value: 'logout', child: ListTile(
+              const PopupMenuItem(value: 'logout', child: ListTile(
                   dense: true, contentPadding: EdgeInsets.zero,
                   leading: Icon(Icons.logout, size: 20), title: Text('Sign out'))),
+              if (KioskMode.enabled && ApiService.canEdit)
+                PopupMenuItem(value: 'exit', child: ListTile(
+                    dense: true, contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.power_settings_new, size: 20, color: AppTheme.danger),
+                    title: Text('Close the kiosk app', style: TextStyle(color: AppTheme.danger)))),
             ],
           ),
         ]),

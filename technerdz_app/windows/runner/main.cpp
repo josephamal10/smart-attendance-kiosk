@@ -21,6 +21,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   std::vector<std::string> command_line_arguments =
       GetCommandLineArguments();
+  // --kiosk (used by run.bat): full screen, no title bar or borders
+  bool kiosk = false;
+  for (const auto& arg : command_line_arguments) {
+    if (arg == "--kiosk") kiosk = true;
+  }
 
   project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
 
@@ -31,6 +36,16 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);
+
+  if (kiosk) {
+    HWND hwnd = window.GetHandle();
+    MONITORINFO monitor = {sizeof(monitor)};
+    ::GetMonitorInfo(::MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY), &monitor);
+    ::SetWindowLongPtr(hwnd, GWL_STYLE, WS_POPUP);
+    const RECT& r = monitor.rcMonitor;
+    ::SetWindowPos(hwnd, HWND_TOP, r.left, r.top, r.right - r.left, r.bottom - r.top,
+                   SWP_FRAMECHANGED | SWP_NOACTIVATE);
+  }
 
   ::MSG msg;
   while (::GetMessage(&msg, nullptr, 0, 0)) {

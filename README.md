@@ -91,8 +91,11 @@ CI: GitHub Actions runs the backend tests and Flutter analyze/tests on every pus
 
 ## Run it
 
-**Quickest (Windows, after setup):** double-click `run.bat`. It starts the server in its own
-window, waits until it's ready, then opens the kiosk app. Close the server window to stop it.
+**Quickest (Windows, after setup):** double-click `run.bat`. It starts the servers in minimised
+windows (each restarts itself if it crashes), waits until they're ready, then opens the kiosk app
+**full screen with no title bar** (`--kiosk`). Super admins close it from their account menu
+("Close the kiosk app"). To start it automatically when Windows signs in:
+`powershell -ExecutionPolicy Bypass -File scripts\install_autostart.ps1` (`-Remove` undoes it).
 
 **Web dashboard** (for HR on their own computers): run `scripts\build_web.bat` once, restart the
 server, then open `http://<kiosk-pc-ip>:8000/app/` in a browser and sign in with an admin account.

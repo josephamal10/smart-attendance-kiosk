@@ -158,12 +158,17 @@ def _lan_ip() -> str | None:
 
 
 def public_base_url(request: Request) -> str:
-    """Where a phone can reach this server: PUBLIC_URL if set, else this PC's LAN address."""
+    """Where a phone can reach this server: PUBLIC_URL if set, else this PC's LAN address.
+
+    run.bat keeps the kiosk's own server on 127.0.0.1 and serves the network over HTTPS on
+    HTTPS_PORT, so a link asked for by the kiosk points phones at that HTTPS address."""
     if os.getenv("PUBLIC_URL"):
         return os.getenv("PUBLIC_URL").rstrip("/")
     base = str(request.base_url).rstrip("/")
     if request.url.hostname in ("127.0.0.1", "localhost", "::1"):
         ip = _lan_ip()
+        if ip and os.getenv("HTTPS_PORT"):
+            return f"https://{ip}:{os.getenv('HTTPS_PORT')}"
         if ip:
             base = base.replace(request.url.hostname, ip, 1)
     return base

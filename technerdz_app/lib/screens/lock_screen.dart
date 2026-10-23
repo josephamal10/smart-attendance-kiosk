@@ -27,6 +27,8 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
   List<Map<String, dynamic>> _notices = [];
   int _notice = 0;
   bool _busy = false; // a screen opened from here is still closing
+  bool? _online;      // null until the first check; false shows the "Offline" badge
+  int _checks = 0;
   final _focus = FocusNode();
 
   // Slow drifting glow in the background (also keeps pixels from burning in) and the tap hint pulse
@@ -45,9 +47,11 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
     super.initState();
     _clock = Timer.periodic(const Duration(seconds: 1), (_) => setState(() => _now = DateTime.now()));
     _loadNotices();
-    _refresh = Timer.periodic(const Duration(minutes: 5), (_) {
-      _loadNotices();
-      Branding.load();
+    _checkServer();
+    // Every 15 s: is the server there (and what's the company called)? Notices every 5 min.
+    _refresh = Timer.periodic(const Duration(seconds: 15), (_) {
+      _checkServer();
+      if (++_checks % 20 == 0) _loadNotices();
     });
     _rotate = Timer.periodic(const Duration(seconds: 8), (_) {
       if (_notices.length > 1) setState(() => _notice = (_notice + 1) % _notices.length);
@@ -63,6 +67,20 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
     _pulse.dispose();
     _focus.dispose();
     super.dispose();
+  }
+
+  Future<void> _checkServer() async {
+    var ok = true;
+    try {
+      final name = await ApiService.companyName();
+      if (name.trim().isNotEmpty) Branding.name.value = name.trim();
+    } catch (_) {
+      ok = false;
+    }
+    if (!mounted || ok == _online) return;
+    final cameBack = _online == false && ok;
+    setState(() => _online = ok);
+    if (cameBack) _loadNotices();
   }
 
   Future<void> _loadNotices() async {
@@ -164,6 +182,7 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             const BrandMark(size: 40, onDark: true, subtitle: 'Attendance'),
             const Spacer(),
+            if (_online == false) ...[_offlineBadge(), const Spacer()],
             _CornerButton(icon: Icons.person_outline_rounded, label: 'My dashboard',
                 tooltip: 'My dashboard — see your attendance, leave and hours', onTap: _myDashboard),
             const SizedBox(width: 14),
@@ -198,6 +217,25 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
       ),
     );
   }
+
+  /// Shown while the server can't be reached, so nobody scans in vain.
+  Widget _offlineBadge() => Tooltip(
+        message: 'Check that the NanoNino server window is open on this PC. '
+            'This clears by itself when the server is back.',
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: BoxDecoration(
+            color: const Color(0xFFDC2626).withValues(alpha: 0.9),
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: const Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.cloud_off_rounded, color: Colors.white, size: 18),
+            SizedBox(width: 8),
+            Text('Offline — check-in is unavailable right now',
+                style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+          ]),
+        ),
+      );
 
   Widget _bigClock(double size) {
     final colonOn = _now.second.isEven; // a gently blinking colon shows the screen is alive

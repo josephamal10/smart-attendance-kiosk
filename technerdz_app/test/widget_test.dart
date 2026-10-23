@@ -23,6 +23,16 @@ void main() {
     await tester.binding.setSurfaceSize(null);
   });
 
+  testWidgets('Lock screen warns when the server cannot be reached', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1366, 768));
+    await tester.pumpWidget(const MaterialApp(home: LockScreen()));
+    // Tests have no server: every request fails, so the badge appears after the first check
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
+    await tester.pump();
+    expect(find.textContaining('Offline'), findsOneWidget);
+    await tester.binding.setSurfaceSize(null);
+  });
+
   testWidgets('Tapping anywhere on the lock screen opens the camera, Back returns', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1366, 768));
     await tester.pumpWidget(const MaterialApp(home: LockScreen()));

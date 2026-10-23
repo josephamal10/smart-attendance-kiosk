@@ -21,30 +21,55 @@ def get_db():
     finally:
         db.close()
 
+ROOT = os.path.dirname(os.path.abspath(__file__))
+HEAD_OF_BASELINE = "0001"
+# Tables that existed before migrations were introduced (revision 0001)
+BASELINE_TABLES = ["employees", "face_images", "attendance_logs", "settings", "holidays",
+                   "leave_requests", "correction_requests", "audit_logs", "notices"]
+
+
 def init_db(bind=engine):
-    """Create missing tables, plus any indexes added to existing tables since
-    (create_all only creates indexes together with a brand-new table)."""
-    import models  # noqa: F401 — registers the tables on Base
-    Base.metadata.create_all(bind=bind)
-    for table in Base.metadata.sorted_tables:
-        for index in table.indexes:
-            index.create(bind=bind, checkfirst=True)
-    _upgrade(bind)
+    """Bring the database to the latest schema by running the Alembic migrations in migrations/.
 
+    A database made before migrations existed (by create_all) is first finished off with the
+    old in-place upgrades, then recorded as being at the baseline, so no data is touched."""
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import inspect
 
-def _upgrade(bind):
-    """Small in-place upgrades for databases created by older versions.
-    (A bigger project would use Alembic migrations for this.)"""
-    from sqlalchemy import inspect, text
-    from models import NO_PASSWORD
-
-    columns = {c["name"] for c in inspect(bind).get_columns("employees")}
-    log_columns = {c["name"] for c in inspect(bind).get_columns("attendance_logs")}
+    cfg = Config(os.path.join(ROOT, "alembic.ini"))
+    cfg.set_main_option("script_location", os.path.join(ROOT, "migrations"))
     with bind.begin() as conn:
-        if "category" not in columns:
-            conn.execute(text("ALTER TABLE employees ADD COLUMN category VARCHAR(30)"))
-        if "auto_checkout" not in log_columns:
-            conn.execute(text("ALTER TABLE attendance_logs ADD COLUMN auto_checkout BOOLEAN NOT NULL DEFAULT 0"))
-        # Employees check in by face only; make sure no old employee password still works
-        conn.execute(text("UPDATE employees SET password = :p WHERE role = 'user' AND password != :p"),
-                     {"p": NO_PASSWORD})
+        cfg.attributes["connection"] = conn
+        tables = set(inspect(conn).get_table_names())
+        if tables and "alembic_version" not in tables:
+            _legacy_upgrade(conn)
+            command.stamp(cfg, HEAD_OF_BASELINE)
+        command.upgrade(cfg, "head")
+        _no_employee_passwords(conn)
+
+
+def _legacy_upgrade(conn):
+    """Old in-place upgrades for pre-migration databases, up to exactly the baseline schema."""
+    from sqlalchemy import inspect, text
+    import models  # noqa: F401 — registers the tables on Base
+
+    baseline = [Base.metadata.tables[t] for t in BASELINE_TABLES]
+    Base.metadata.create_all(bind=conn, tables=baseline)
+    for table in baseline:
+        for index in table.indexes:
+            index.create(bind=conn, checkfirst=True)
+    columns = {c["name"] for c in inspect(conn).get_columns("employees")}
+    log_columns = {c["name"] for c in inspect(conn).get_columns("attendance_logs")}
+    if "category" not in columns:
+        conn.execute(text("ALTER TABLE employees ADD COLUMN category VARCHAR(30)"))
+    if "auto_checkout" not in log_columns:
+        conn.execute(text("ALTER TABLE attendance_logs ADD COLUMN auto_checkout BOOLEAN NOT NULL DEFAULT 0"))
+
+
+def _no_employee_passwords(conn):
+    """Employees check in by face only; make sure no old employee password still works."""
+    from sqlalchemy import text
+    from models import NO_PASSWORD
+    conn.execute(text("UPDATE employees SET password = :p WHERE role = 'user' AND password != :p"),
+                 {"p": NO_PASSWORD})

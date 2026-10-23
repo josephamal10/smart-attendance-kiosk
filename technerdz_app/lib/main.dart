@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:camera_windows/camera_windows.dart';
 import 'services/api_service.dart';
+import 'services/kiosk_mode.dart';
 import 'theme/app_theme.dart';
 import 'theme/appearance.dart';
 import 'theme/branding.dart';
@@ -17,8 +18,9 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 /// browser (the web build is the admin dashboard for HR's own computers — no camera there).
 Widget homeScreen() => kIsWeb ? const AdminLoginScreen() : const LockScreen();
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  KioskMode.enabled = args.contains('--kiosk');
   await Appearance.load();
   unawaited(Branding.load()); // company name for the lock screen; doesn't block start-up
   // Native camera plugin only on Windows (the web build is used for UI previews/screenshots)

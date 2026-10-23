@@ -6,6 +6,7 @@ email-validator==2.3.0   # validates HR email addresses in settings
 openpyxl==3.1.5          # Excel export of the monthly register
 reportlab==5.0.1         # employees' monthly PDF report
 python-dotenv==1.2.2
+alembic==1.20.1          # database migrations (migrations/), run automatically on start-up
 
 # Database
 SQLAlchemy==2.0.50

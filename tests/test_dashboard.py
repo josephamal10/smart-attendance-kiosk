@@ -194,3 +194,13 @@ def test_todays_shift_is_only_expected_once_the_day_is_done(db_session, make_emp
     _add(db_session, _log(emp.id, date(2026, 10, 19), "08:50", None))   # Monday, still at work
     week = me_service.weekly_hours(_history(db_session, emp, date(2026, 10, 19)), weeks=1)[0]
     assert week["expected"] == 0.0
+
+
+def test_report_link_from_the_kiosk_points_phones_at_https(client, make_employee, monkeypatch):
+    from routes import me_routes
+    arun = make_employee("arun")
+    monkeypatch.setattr(me_routes, "_lan_ip", lambda: "192.168.1.50")
+    monkeypatch.setenv("HTTPS_PORT", "8443")
+    client.base_url = "http://127.0.0.1:8000"   # the kiosk app talks to the local server
+    url = client.post("/me/report-link", headers=_me(arun)).json()["url"]
+    assert url.startswith("https://192.168.1.50:8443/r/")

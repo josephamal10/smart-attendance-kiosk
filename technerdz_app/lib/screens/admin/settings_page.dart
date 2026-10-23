@@ -243,6 +243,8 @@ class _SettingsPageState extends State<SettingsPage> {
         _row('Send daily summary', 'Present, late, on leave and absent, with each person\'s times.',
             Switch(value: _edit['email_enabled'] == true, onChanged: (v) => _set('email_enabled', v))),
         _row('Send at', 'Sent once a day, after this time.', _timeButton('email_time')),
+        _row('Monthly register', 'On the 1st of each month, also send last month\'s register as an Excel file.',
+            Switch(value: _edit['monthly_register_email'] == true, onChanged: (v) => _set('monthly_register_email', v))),
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 14),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -275,6 +277,14 @@ class _SettingsPageState extends State<SettingsPage> {
                   : const Icon(Icons.send_outlined, size: 18),
               label: const Text('Send test'),
             )),
+      ]),
+      const SizedBox(height: AppTheme.gap),
+      _section('Kiosk', Icons.storefront_outlined, [
+        _row('Birthdays & work anniversaries', 'Shown on the lock screen on the day (first names only). '
+            'Set the dates in each employee\'s details.',
+            Switch(value: _edit['show_celebrations'] == true, onChanged: (v) => _set('show_celebrations', v))),
+        _row('Voice greeting', 'The kiosk says "Good morning, Priya. You\'re checked in." after each scan.',
+            Switch(value: _edit['voice_greeting'] == true, onChanged: (v) => _set('voice_greeting', v))),
       ]),
       const SizedBox(height: AppTheme.gap),
       _section('Backups', Icons.backup_outlined, [

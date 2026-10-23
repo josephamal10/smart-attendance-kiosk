@@ -23,6 +23,8 @@ class Employee(Base):
     role = Column(String(10), default="user")  # "admin" (dashboard) or "user" (employee)
     category = Column(String(30), nullable=True)  # HR, Developer, ... (see schemas.CATEGORIES)
     is_active = Column(Boolean, default=True)
+    birthday = Column(Date, nullable=True)        # optional: celebrated on the lock screen
+    joined_on = Column(Date, nullable=True)       # optional: work anniversaries on the lock screen
     created_at = Column(DateTime, default=_utcnow)
 
     face_images = relationship("FaceImage", back_populates="employee")
@@ -84,7 +86,7 @@ class LeaveRequest(Base):
     employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False, index=True)
     start_date = Column(Date, nullable=False)
     end_date = Column(Date, nullable=False)
-    kind = Column(String(20), nullable=False)               # sick / casual / other
+    kind = Column(String(20), nullable=False)               # sick / casual / other / wfh (work from home)
     reason = Column(Text, default="")
     status = Column(String(10), default="pending", nullable=False)  # pending / approved / rejected
     created_at = Column(DateTime, default=_utcnow)
@@ -135,3 +137,22 @@ class Notice(Base):
     expires_on = Column(Date, nullable=True)          # last day it's shown; null = until removed
     created_at = Column(DateTime, default=datetime.now, nullable=False)  # local time
     created_by = Column(String(100), nullable=False)
+
+
+class ShiftChange(Base):
+    """An employee asking to work different hours on one day (e.g. 11:00–20:00 for a doctor's
+    appointment). Once approved, late / early leave / overtime use these hours for that day."""
+    __tablename__ = "shift_changes"
+
+    id = Column(Integer, primary_key=True)
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False, index=True)
+    date = Column(Date, nullable=False)
+    start = Column(String(5), nullable=False)               # "HH:MM"
+    end = Column(String(5), nullable=False)
+    reason = Column(Text, default="")
+    status = Column(String(10), default="pending", nullable=False)  # pending / approved / rejected
+    created_at = Column(DateTime, default=datetime.now)
+    decided_at = Column(DateTime, nullable=True)
+    decided_by = Column(Integer, ForeignKey("employees.id"), nullable=True)
+
+    employee = relationship("Employee", foreign_keys=[employee_id])

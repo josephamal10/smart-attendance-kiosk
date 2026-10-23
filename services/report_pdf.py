@@ -8,9 +8,9 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-STATUS_TEXT = {"present": "Present", "late": "Late", "half_day": "Half day", "absent": "Absent",
+STATUS_TEXT = {"present": "Present", "late": "Late", "half_day": "Half day", "wfh": "Work from home", "absent": "Absent",
                "leave": "Leave", "holiday": "Holiday", "off": "Day off", "future": ""}
-STATUS_COLOUR = {"present": "#DCFCE7", "late": "#FEF3C7", "half_day": "#FFE4E6", "absent": "#FEE2E2",
+STATUS_COLOUR = {"present": "#DCFCE7", "late": "#FEF3C7", "half_day": "#FFE4E6", "wfh": "#CCFBF1", "absent": "#FEE2E2",
                  "leave": "#DBEAFE", "holiday": "#EDE9FE"}
 FLAG_TEXT = {"late": "late", "early_leave": "left early", "half_day": "half day",
              "missed_checkout": "auto check-out"}
@@ -33,11 +33,11 @@ def build(company: str, register: dict, row: dict) -> bytes:
 
     t = row["totals"]
     summary = Table(
-        [["Present", "Late", "Half day", "Absent", "Leave", "Hours", "Overtime", "Attendance"],
-         [t["present"], t["late"], t["half_day"], t["absent"], t["leave"], row["worked_hours"],
+        [["Present", "Late", "Half day", "WFH", "Absent", "Leave", "Hours", "Overtime", "Attendance"],
+         [t["present"], t["late"], t["half_day"], t["wfh"], t["absent"], t["leave"], row["worked_hours"],
           f"{row['overtime_hours']} h",
           f"{row['attendance_pct']}%" if row["attendance_pct"] is not None else "–"]],
-        colWidths=[22 * mm] * 8)
+        colWidths=[19.5 * mm] * 9)
     summary.setStyle(TableStyle([
         ("FONT", (0, 0), (-1, 0), "Helvetica", 8), ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#6B7280")),
         ("FONT", (0, 1), (-1, 1), "Helvetica-Bold", 13),

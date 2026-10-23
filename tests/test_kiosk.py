@@ -217,9 +217,9 @@ def test_ear_uses_pixel_coordinates():
 
 
 def test_lock_screen_gets_the_company_name_without_signing_in(client, make_employee, login):
-    assert client.get("/kiosk/info").json() == {"company_name": "NanoNino"}
+    assert client.get("/kiosk/info").json()["company_name"] == "NanoNino"
     make_employee("boss", role="admin")
     s = client.get("/admin/settings", headers=login("boss")).json()
     s.pop("smtp_configured", None)
     client.put("/admin/settings", headers=login("boss"), json={**s, "company_name": "NANONINO"})
-    assert client.get("/kiosk/info").json() == {"company_name": "NANONINO"}
+    assert client.get("/kiosk/info").json()["company_name"] == "NANONINO"

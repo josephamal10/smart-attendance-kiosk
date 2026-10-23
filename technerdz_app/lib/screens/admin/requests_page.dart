@@ -6,7 +6,8 @@ import '../../theme/app_theme.dart';
 import '../../widgets/ui.dart';
 import 'attendance_edit_dialog.dart';
 
-/// Leave requests and "my attendance is wrong" reports sent from the kiosk.
+/// Leave / work-from-home requests, one-day shift changes and "my attendance is wrong" reports,
+/// all sent from employees' dashboards at the kiosk.
 class RequestsPage extends StatefulWidget {
   final List<Employee> employees;
   final VoidCallback onChanged; // refresh dashboard counts after a decision
@@ -20,6 +21,7 @@ class _RequestsPageState extends State<RequestsPage> {
   String _tab = 'leave';
   List<LeaveRequest> _leave = [];
   List<CorrectionRequest> _corrections = [];
+  List<Map<String, dynamic>> _shifts = [];
   bool _loading = true;
 
   @override
@@ -31,11 +33,12 @@ class _RequestsPageState extends State<RequestsPage> {
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final r = await Future.wait([ApiService.getLeave(), ApiService.getCorrections()]);
+      final r = await Future.wait([ApiService.getLeave(), ApiService.getCorrections(), ApiService.getShiftChanges()]);
       if (!mounted) return;
       setState(() {
         _leave = r[0] as List<LeaveRequest>;
         _corrections = r[1] as List<CorrectionRequest>;
+        _shifts = r[2] as List<Map<String, dynamic>>;
       });
     } catch (e) {
       if (mounted) _toast('Could not load requests: $e', error: true);
@@ -48,6 +51,17 @@ class _RequestsPageState extends State<RequestsPage> {
       SnackBar(content: Text(msg), backgroundColor: error ? AppTheme.danger : null));
 
   Employee? _emp(int id) => widget.employees.where((e) => e.id == id).firstOrNull;
+
+  Future<void> _decideShift(Map<String, dynamic> s, bool approve) async {
+    try {
+      await ApiService.decideShiftChange(s['id'], approve);
+      _toast(approve ? 'Shift change approved. That day now uses ${s['start']}–${s['end']}.' : 'Shift change rejected.');
+      widget.onChanged();
+      _load();
+    } catch (e) {
+      _toast('Failed: $e', error: true);
+    }
+  }
 
   Future<void> _decideLeave(LeaveRequest l, bool approve) async {
     try {
@@ -109,12 +123,15 @@ class _RequestsPageState extends State<RequestsPage> {
   Widget build(BuildContext context) {
     final pendingLeave = _leave.where((l) => l.status == 'pending').length;
     final pendingFix = _corrections.where((c) => c.status == 'pending').length;
+    final pendingShift = _shifts.where((s) => s['status'] == 'pending').length;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Row(children: [
         SegmentedButton<String>(
           segments: [
             ButtonSegment(value: 'leave', label: Text('Leave${pendingLeave > 0 ? '  ($pendingLeave)' : ''}'),
                 icon: const Icon(Icons.beach_access_outlined)),
+            ButtonSegment(value: 'shift', label: Text('Shift changes${pendingShift > 0 ? '  ($pendingShift)' : ''}'),
+                icon: const Icon(Icons.swap_horiz_rounded)),
             ButtonSegment(value: 'fix', label: Text('Corrections${pendingFix > 0 ? '  ($pendingFix)' : ''}'),
                 icon: const Icon(Icons.build_outlined)),
           ],
@@ -130,7 +147,7 @@ class _RequestsPageState extends State<RequestsPage> {
               label: const Text('Record leave')),
       ]),
       const SizedBox(height: 16),
-      if (_tab == 'leave') _leaveTable() else _correctionTable(),
+      switch (_tab) { 'leave' => _leaveTable(), 'shift' => _shiftTable(), _ => _correctionTable() },
     ]);
   }
 
@@ -159,6 +176,38 @@ class _RequestsPageState extends State<RequestsPage> {
                     OutlinedButton(onPressed: () => _decideLeave(l, false), child: const Text('Reject')),
                     const SizedBox(width: 8),
                     ElevatedButton(onPressed: () => _decideLeave(l, true), child: const Text('Approve')),
+                  ]),
+          ],
+      ],
+    );
+  }
+
+  Widget _shiftTable() {
+    final sorted = [..._shifts]..sort((a, b) {
+        final p = (a['status'] == 'pending' ? 0 : 1) - (b['status'] == 'pending' ? 0 : 1);
+        return p != 0 ? p : (b['created_at'] as String).compareTo(a['created_at'] as String);
+      });
+    return DataCard(
+      header: Text('One-day shift changes', style: AppTheme.h3),
+      empty: const EmptyState(icon: Icons.swap_horiz_rounded, title: 'No shift changes',
+          message: 'Employees can ask to work different hours on one day from their dashboard.'),
+      columns: const [Col('Employee', flex: 3), Col('Day', flex: 2), Col('Hours', flex: 2),
+          Col('Reason', flex: 4), Col('Status', flex: 2), Col('', flex: 3, alignEnd: true)],
+      rows: [
+        for (final s in sorted)
+          [
+            PersonCell(_emp(s['employee_id'])?.name ?? 'Former employee', secondary: _emp(s['employee_id'])?.category),
+            Text(DateFormat('EEE, d MMM').format(DateTime.parse(s['date'])), style: AppTheme.body),
+            Text('${s['start']} – ${s['end']}', style: AppTheme.body.copyWith(fontFeatures: AppTheme.tabular)),
+            Text((s['reason'] as String? ?? '').isEmpty ? '—' : s['reason'], style: AppTheme.muted,
+                maxLines: 2, overflow: TextOverflow.ellipsis),
+            _statusBadge(s['status']),
+            s['status'] != 'pending' || !ApiService.canEdit
+                ? const SizedBox.shrink()
+                : Row(mainAxisSize: MainAxisSize.min, children: [
+                    OutlinedButton(onPressed: () => _decideShift(s, false), child: const Text('Reject')),
+                    const SizedBox(width: 8),
+                    ElevatedButton(onPressed: () => _decideShift(s, true), child: const Text('Approve')),
                   ]),
           ],
       ],
@@ -211,7 +260,8 @@ String _dates(DateTime a, DateTime b) {
   return a == b ? DateFormat('EEE, d MMM').format(a) : '${f.format(a)} – ${f.format(b)}';
 }
 
-String _leaveKind(String k) => switch (k) { 'sick' => 'Sick', 'casual' => 'Casual', _ => 'Other' };
+String _leaveKind(String k) =>
+    switch (k) { 'sick' => 'Sick', 'casual' => 'Casual', 'wfh' => 'Work from home', _ => 'Other' };
 String _kindLabel(String k) =>
     switch (k) { 'missed_checkout' => 'Forgot check-out', 'wrong_time' => 'Wrong time', _ => 'Other' };
 
@@ -293,6 +343,7 @@ class _RecordLeaveDialogState extends State<_RecordLeaveDialog> {
                 ButtonSegment(value: 'casual', label: Text('Casual')),
                 ButtonSegment(value: 'sick', label: Text('Sick')),
                 ButtonSegment(value: 'other', label: Text('Other')),
+                ButtonSegment(value: 'wfh', label: Text('Work from home')),
               ],
               selected: {_kind},
               showSelectedIcon: false,

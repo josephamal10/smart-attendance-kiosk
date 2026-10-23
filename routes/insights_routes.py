@@ -27,6 +27,7 @@ def analytics(days: int = Query(30, ge=7, le=365), db: Session = Depends(get_db)
     holidays = R.holidays_between(db, start, today)
     workdays = R.working_days(rules, holidays, start, today)
     leave = R.leave_days(db, None, start, today)
+    wfh = R.leave_days(db, None, start, today, wfh=True)
 
     employees = db.query(Employee).filter(Employee.role == "user", Employee.is_active == True).all()  # noqa: E712
     team_of = {e.id: e.category or "No team" for e in employees}
@@ -49,6 +50,7 @@ def analytics(days: int = Query(30, ge=7, le=365), db: Session = Depends(get_db)
             "present": len(day_logs),
             "late": sum(1 for l in day_logs if "late" in evals[l.id].flags),
             "on_leave": sum(1 for e in employees if d in leave.get(e.id, ())),
+            "wfh": sum(1 for e in employees if d in wfh.get(e.id, ())),
             "avg_arrival": round(mean(arrivals)) if arrivals else None,
         })
 
@@ -60,10 +62,13 @@ def analytics(days: int = Query(30, ge=7, le=365), db: Session = Depends(get_db)
         members = [e for e in employees if team_of[e.id] == team]
         expected = sum(len(workdays) - len(leave.get(e.id, set()) & set(workdays)) for e in members)
         t_logs = [l for l in work_logs if team_of[l.employee_id] == team]
+        logged = {(l.employee_id, l.date) for l in t_logs}
+        t_home = sum(1 for e in members for d in wfh.get(e.id, set()) & set(workdays)
+                     if (e.id, d.isoformat()) not in logged)
         teams.append({
             "team": team,
             "members": len(members),
-            "presence_pct": round(len(t_logs) / expected * 100, 1) if expected else 0.0,
+            "presence_pct": round((len(t_logs) + t_home) / expected * 100, 1) if expected else 0.0,
             "late": sum(1 for l in t_logs if "late" in evals[l.id].flags),
             "avg_arrival": round(mean(_minutes(l.in_time) for l in t_logs)) if t_logs else None,
         })

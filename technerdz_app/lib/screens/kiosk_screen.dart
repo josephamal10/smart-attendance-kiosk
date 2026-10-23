@@ -4,7 +4,9 @@ import 'dart:math';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../i18n/kiosk_text.dart';
 import '../services/api_service.dart';
+import '../services/voice.dart';
 import '../theme/app_theme.dart';
 import '../widgets/camera_stage.dart';
 import '../widgets/clock_widget.dart';
@@ -182,6 +184,7 @@ class _KioskScreenState extends State<KioskScreen> {
       if (!mounted || !_running) return Duration.zero;
       _sessionId = _newSessionId();
       if (out['recognized'] == true && openDashboard) {
+        Voice.say(KioskScreenSpeech.of({...out, 'action': 'dashboard'}, DateTime.now()));
         _openMyAttendance(out);
       } else if (out['recognized'] == true) {
         _showResult(out);
@@ -205,6 +208,7 @@ class _KioskScreenState extends State<KioskScreen> {
   }
 
   void _showResult(Map<String, dynamic> res) {
+    Voice.say(KioskScreenSpeech.of(res, DateTime.now()));
     _resultTimer?.cancel();
     setState(() {
       _result = res;
@@ -257,7 +261,7 @@ class _KioskScreenState extends State<KioskScreen> {
         Expanded(
           child: CameraStage(
             controller: _cam,
-            unavailableMessage: _noCamera ? 'Camera not available' : null,
+            unavailableMessage: _noCamera ? KioskText.t('no_camera') : null,
             showGuide: _phase != _Phase.result,
             guideColor: switch (_phase) {
               _Phase.blink => AppTheme.primary,
@@ -273,7 +277,7 @@ class _KioskScreenState extends State<KioskScreen> {
                     ? OutlinedButton.icon(
                         onPressed: () { _bumpIdle(); _startCamera(); },
                         icon: const Icon(Icons.refresh, size: 18),
-                        label: const Text('Try again'),
+                        label: Text(KioskText.t('try_again')),
                       )
                     : null,
           ),
@@ -284,16 +288,16 @@ class _KioskScreenState extends State<KioskScreen> {
   }
 
   Widget _instructionPill() => switch (_phase) {
-        _Phase.identifying => const CameraPill('Recognising you...',
-            leading: SizedBox(width: 16, height: 16,
+        _Phase.identifying => CameraPill(KioskText.t('pill_identifying'),
+            leading: const SizedBox(width: 16, height: 16,
                 child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))),
-        _Phase.blink => const CameraPill('Now blink once',
-            leading: Icon(Icons.visibility_outlined, color: Colors.white, size: 20)),
-        _ when _dashboardMode => CameraPill('Look at the camera to open your dashboard',
+        _Phase.blink => CameraPill(KioskText.t('pill_blink'),
+            leading: const Icon(Icons.visibility_outlined, color: Colors.white, size: 20)),
+        _ when _dashboardMode => CameraPill(KioskText.t('pill_dashboard'),
             color: AppTheme.primary,
             leading: const Icon(Icons.dashboard_outlined, color: Colors.white, size: 20)),
-        _ => const CameraPill('Look at the camera to check in or out',
-            leading: Icon(Icons.face_outlined, color: Colors.white, size: 20)),
+        _ => CameraPill(KioskText.t('pill_check_in'),
+            leading: const Icon(Icons.face_outlined, color: Colors.white, size: 20)),
       };
 
   Widget _panel() {
@@ -314,7 +318,7 @@ class _KioskScreenState extends State<KioskScreen> {
           child: OutlinedButton.icon(
             onPressed: _leave,
             icon: const Icon(Icons.arrow_back_rounded, size: 18),
-            label: const Text('Back'),
+            label: Text(KioskText.t('back')),
           ),
         ),
       ]),
@@ -327,25 +331,25 @@ class _KioskScreenState extends State<KioskScreen> {
       const Divider(),
       const SizedBox(height: 28),
       if (_dashboardMode) ...[
-        const InfoBanner('Opening your dashboard — this scan will not check you in or out.', tone: Tone.primary),
+        InfoBanner(KioskText.t('dash_banner'), tone: Tone.primary),
         const SizedBox(height: 20),
       ],
-      Text(_dashboardMode ? 'HOW TO OPEN YOUR DASHBOARD' : 'HOW TO CHECK IN', style: AppTheme.overline),
+      Text(KioskText.t(_dashboardMode ? 'how_dashboard' : 'how_check_in'), style: AppTheme.overline),
       const SizedBox(height: 18),
-      StepRow(number: 1, title: 'Look at the camera',
-          subtitle: 'Stand so your face fits the oval', done: step > 1, active: step == 1),
+      StepRow(number: 1, title: KioskText.t('step1'),
+          subtitle: KioskText.t('step1_sub'), done: step > 1, active: step == 1),
       const SizedBox(height: 18),
-      StepRow(number: 2, title: 'Blink once',
-          subtitle: 'Shows a real person is there', done: step > 2, active: step == 2),
+      StepRow(number: 2, title: KioskText.t('step2'),
+          subtitle: KioskText.t('step2_sub'), done: step > 2, active: step == 2),
       const SizedBox(height: 18),
-      StepRow(number: 3, title: "That's it",
-          subtitle: _dashboardMode ? 'Your dashboard opens' : 'You are recognised and checked in or out',
+      StepRow(number: 3, title: KioskText.t('step3'),
+          subtitle: KioskText.t(_dashboardMode ? 'step3_sub_dash' : 'step3_sub'),
           done: step > 3, active: step == 3),
       const Spacer(),
       Row(children: [
         Icon(Icons.lock_outline, size: 15, color: AppTheme.textMuted),
         const SizedBox(width: 8),
-        Expanded(child: Text('Your photo is only used to recognise you and is not stored.',
+        Expanded(child: Text(KioskText.t('privacy_short'),
             style: TextStyle(fontSize: 12, color: AppTheme.textMuted))),
       ]),
     ]);
@@ -358,26 +362,26 @@ class _KioskScreenState extends State<KioskScreen> {
     switch (r['action']) {
       case 'in':
         return flags.contains('late')
-            ? ('Late by ${r['late_minutes']} min', Tone.warning, Icons.schedule)
-            : ('On time', Tone.success, Icons.check_circle_outline);
+            ? (KioskText.t('late_by', {'n': r['late_minutes']}), Tone.warning, Icons.schedule)
+            : (KioskText.t('on_time'), Tone.success, Icons.check_circle_outline);
       case 'out':
       case 'done':
-        final w = worked == null ? 'Day complete' : 'Worked ${formatMinutes(worked)} today';
+        final w = worked == null ? KioskText.t('day_complete') : KioskText.t('worked', {'x': formatMinutes(worked)});
         return flags.contains('early_leave')
-            ? ('$w · left ${r['early_minutes']} min early', Tone.warning, Icons.timelapse)
+            ? ('$w · ${KioskText.t('left_early', {'n': r['early_minutes']})}', Tone.warning, Icons.timelapse)
             : (w, Tone.primary, Icons.timelapse);
       default:
-        return ('Checked in earlier today', Tone.neutral, Icons.info_outline);
+        return (KioskText.t('earlier'), Tone.neutral, Icons.info_outline);
     }
   }
 
   Widget _resultCard(Map<String, dynamic> r) {
     final action = r['action'] as String?;
     final (Color c, IconData icon, String label) = switch (action) {
-      'in'       => (AppTheme.success, Icons.login_rounded, 'Checked in'),
-      'out'      => (AppTheme.primary, Icons.logout_rounded, 'Checked out'),
-      'too_soon' => (AppTheme.warning, Icons.schedule_rounded, 'Already checked in'),
-      _          => (AppTheme.textSecondary, Icons.task_alt_rounded, 'All done for today'),
+      'in'       => (AppTheme.success, Icons.login_rounded, KioskText.t('checked_in')),
+      'out'      => (AppTheme.primary, Icons.logout_rounded, KioskText.t('checked_out')),
+      'too_soon' => (AppTheme.warning, Icons.schedule_rounded, KioskText.t('already_in')),
+      _          => (AppTheme.textSecondary, Icons.task_alt_rounded, KioskText.t('all_done')),
     };
     final time = DateTime.tryParse(r['time'] ?? '') ?? DateTime.now();
     final name = r['name'] as String? ?? '';
@@ -395,7 +399,7 @@ class _KioskScreenState extends State<KioskScreen> {
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         InitialsAvatar(name, size: 64),
         const SizedBox(height: 14),
-        Text(r['greeting'] ?? name, textAlign: TextAlign.center, style: AppTheme.h2),
+        Text('${KioskText.greeting(time)}, ${name.split(' ').first}!', textAlign: TextAlign.center, style: AppTheme.h2),
         const SizedBox(height: 6),
         Row(mainAxisSize: MainAxisSize.min, children: [
           Flexible(child: Text(name, overflow: TextOverflow.ellipsis, style: AppTheme.muted)),
@@ -426,7 +430,9 @@ class _KioskScreenState extends State<KioskScreen> {
               fontSize: 15, fontWeight: FontWeight.w600, color: summaryTone.fg))),
         ]),
         const SizedBox(height: 6),
-        Text(r['message'] ?? '', textAlign: TextAlign.center, style: AppTheme.muted),
+        Text(KioskText.t(switch (action) {
+              'in' => 'msg_in', 'out' => 'msg_out', 'too_soon' => 'msg_too_soon', _ => 'msg_done' }),
+            textAlign: TextAlign.center, style: AppTheme.muted),
         const SizedBox(height: 18),
         if (r['self_token'] != null)
           SizedBox(
@@ -434,13 +440,29 @@ class _KioskScreenState extends State<KioskScreen> {
             child: OutlinedButton.icon(
               onPressed: () => _openMyAttendance(r),
               icon: const Icon(Icons.calendar_month_outlined, size: 18),
-              label: const Text('My dashboard'),
+              label: Text(KioskText.t('my_dashboard')),
             ),
           ),
         const SizedBox(height: 12),
-        Text('Back to the home screen in $_resultCountdown s',
+        Text(KioskText.t('back_in', {'n': _resultCountdown}),
             style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
       ]),
     );
+  }
+}
+
+class KioskScreenSpeech {
+  /// What the kiosk says out loud (Windows only has English voices built in, so English).
+  static String of(Map<String, dynamic> r, DateTime now) {
+    final first = (r['name'] as String? ?? '').split(' ').first;
+    final hello = now.hour < 12 ? 'Good morning' : now.hour < 17 ? 'Good afternoon' : 'Good evening';
+    final late = ((r['flags'] as List?) ?? const []).contains('late');
+    return switch (r['action']) {
+      'in' => late ? "$hello, $first. You're checked in, ${r['late_minutes']} minutes late." : "$hello, $first. You're checked in.",
+      'out' => 'Goodbye, $first. See you tomorrow.',
+      'too_soon' => "Hi $first, you're already checked in.",
+      'done' => "Hi $first, you're all done for today.",
+      _ => 'Opening your dashboard, $first.',
+    };
   }
 }

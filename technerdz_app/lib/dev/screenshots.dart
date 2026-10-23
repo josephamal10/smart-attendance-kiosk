@@ -5,6 +5,8 @@
 //   ?screen=dashboard&page=attendance:register
 //   ?screen=profile&id=3      ?screen=lock      ?screen=kiosk      ?screen=login      ?screen=me
 import 'package:flutter/material.dart';
+import 'package:intl/date_symbol_data_local.dart';
+import '../i18n/kiosk_text.dart';
 import '../screens/admin_dashboard.dart';
 import '../screens/admin_login_screen.dart';
 import '../screens/kiosk_screen.dart';
@@ -17,11 +19,14 @@ import '../theme/branding.dart';
 const _adminToken = String.fromEnvironment('DEMO_TOKEN');
 const _selfToken = String.fromEnvironment('SELF_TOKEN');
 
-void main() {
+Future<void> main() async {
   final q = Uri.base.queryParameters;
+  await initializeDateFormatting();
+  KioskText.lang.value = KioskLang.values.firstWhere((l) => l.name == q['lang'], orElse: () => KioskLang.en);
   AppTheme.isDark = q['dark'] == '1';
   ApiService.setSession(_adminToken, 1, 'admin', 'Demo Admin');
   Branding.load();
+  LockScreen.pollServer = false;
   final Widget home = switch (q['screen']) {
     'lock' => const LockScreen(),
     'kiosk' => KioskScreen(demoResult: {

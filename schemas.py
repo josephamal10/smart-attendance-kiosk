@@ -34,11 +34,15 @@ class EmployeeCreate(BaseModel):
     """Employees have no username or password: they check in with their face."""
     name: str = Field(min_length=1, max_length=100)
     category: Category
+    birthday: Optional[date] = None
+    joined_on: Optional[date] = None
 
 class EmployeeUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=100)
     category: Optional[Category] = None
     is_active: Optional[bool] = None
+    birthday: Optional[date] = None    # send null to clear
+    joined_on: Optional[date] = None
 
 class EmployeeOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -48,6 +52,8 @@ class EmployeeOut(BaseModel):
     role: str
     is_active: bool
     created_at: datetime
+    birthday: Optional[date] = None
+    joined_on: Optional[date] = None
 
 # ---------- Attendance ----------
 Flag = Literal["late", "early_leave", "half_day", "missed_checkout"]
@@ -104,6 +110,9 @@ class SettingsModel(BaseModel):
     hr_emails: list[EmailStr]
     email_enabled: bool
     email_time: str = hhmm()
+    monthly_register_email: bool = True
+    show_celebrations: bool = True
+    voice_greeting: bool = True
 
     @field_validator("weekend_days")
     @classmethod
@@ -121,7 +130,7 @@ class HolidayOut(HolidayIn):
     model_config = ConfigDict(from_attributes=True)
     id: int
 
-LeaveKind = Literal["sick", "casual", "other"]
+LeaveKind = Literal["sick", "casual", "other", "wfh"]  # wfh = work from home: counts as attended
 
 class LeaveIn(BaseModel):
     start_date: date
@@ -222,3 +231,28 @@ class NoticeOut(NoticeIn):
     id: int
     created_at: datetime
     created_by: str
+
+
+# ---------- Shift change for a day ----------
+_HHMM = r"^([01]\d|2[0-3]):[0-5]\d$"
+
+class ShiftChangeIn(BaseModel):
+    date: date
+    start: str = Field(pattern=_HHMM)
+    end: str = Field(pattern=_HHMM)
+    reason: str = Field(default="", max_length=500)
+
+    @field_validator("end")
+    @classmethod
+    def _after_start(cls, v, info):
+        if "start" in info.data and v <= info.data["start"]:
+            raise ValueError("end time must be after start time")
+        return v
+
+class ShiftChangeOut(ShiftChangeIn):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    employee_id: int
+    status: str
+    created_at: datetime
+    decided_at: Optional[datetime]

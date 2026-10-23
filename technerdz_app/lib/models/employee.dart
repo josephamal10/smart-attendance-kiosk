@@ -4,6 +4,8 @@ class Employee {
   final String? category; // HR, Project Manager, Admin, Developer, Tester (null = not set yet)
   final String role;
   final bool isActive;
+  final DateTime? birthday;  // optional: celebrated on the lock screen
+  final DateTime? joinedOn;  // optional: work anniversaries
 
   Employee({
     required this.id,
@@ -11,6 +13,8 @@ class Employee {
     this.category,
     required this.role,
     required this.isActive,
+    this.birthday,
+    this.joinedOn,
   });
 
   factory Employee.fromJson(Map<String, dynamic> j) => Employee(
@@ -19,6 +23,8 @@ class Employee {
     category: j['category'],
     role:     j['role'] ?? 'user',
     isActive: j['is_active'] ?? true,
+    birthday: j['birthday'] != null ? DateTime.parse(j['birthday']) : null,
+    joinedOn: j['joined_on'] != null ? DateTime.parse(j['joined_on']) : null,
   );
 }
 

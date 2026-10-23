@@ -17,7 +17,6 @@ dependencies:
   shared_preferences: ^2.5.6
   qr_flutter: ^4.1.0      # QR code to download "My report" on a phone
   web: ^1.1.0             # browser downloads in the web admin dashboard
-
 dev_dependencies:
   flutter_test:
     sdk: flutter

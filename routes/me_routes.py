@@ -15,8 +15,9 @@ from sqlalchemy.orm import Session
 
 from auth import create_access_token, decode_token
 from database import get_db
-from models import AttendanceLog, CorrectionRequest, Employee, LeaveRequest
-from schemas import CorrectionIn, CorrectionOut, LeaveIn, LeaveOut, NoticeOut
+from models import AttendanceLog, CorrectionRequest, Employee, LeaveRequest, ShiftChange
+from schemas import (CorrectionIn, CorrectionOut, LeaveIn, LeaveOut, NoticeOut, ShiftChangeIn,
+                     ShiftChangeOut)
 from services import me_service, register, report_pdf
 from services import rules as R
 from services.settings_service import get as get_setting
@@ -48,6 +49,7 @@ def my_summary(year: int | None = Query(None, ge=2000, le=2100), month: int | No
     holidays = R.holidays_between(db, month_start, today)
     workdays = set(R.working_days(rules, holidays, month_start, today))
     leave = R.leave_days(db, emp.id, month_start, today).get(emp.id, set())
+    at_home = R.leave_days(db, emp.id, month_start, today, wfh=True).get(emp.id, set()) & workdays
 
     logs = (db.query(AttendanceLog).filter(AttendanceLog.employee_id == emp.id,
                                            AttendanceLog.date >= (today - timedelta(days=45)).isoformat())
@@ -65,10 +67,11 @@ def my_summary(year: int | None = Query(None, ge=2000, le=2100), month: int | No
         "name": emp.name,
         "category": emp.category,
         "month": {
-            "present": len([l for l in month_logs if date.fromisoformat(l.date) in workdays]),
+            "present": len({date.fromisoformat(l.date) for l in month_logs} & workdays | at_home),
             "late": sum(1 for l in month_logs if "late" in evals[l.id].flags),
             "leave": len(leave & workdays),
-            "absent": len([d for d in workdays if d < today and d not in leave
+            "wfh": len(at_home),
+            "absent": len([d for d in workdays if d < today and d not in leave and d not in at_home
                            and d.isoformat() not in {l.date for l in month_logs}]),
             "working_days": len(workdays),
             "avg_hours": round(sum(worked) / len(worked) / 60, 1) if worked else None,
@@ -111,6 +114,20 @@ def request_leave(data: LeaveIn, emp: Employee = Depends(get_self), db: Session 
     db.commit()
     db.refresh(lr)
     return lr
+
+
+@router.post("/shift-change", response_model=ShiftChangeOut)
+def request_shift_change(data: ShiftChangeIn, emp: Employee = Depends(get_self), db: Session = Depends(get_db)):
+    """Ask to work different hours on one day. Once approved, that day is judged by them."""
+    if data.date < date.today() - timedelta(days=7):
+        raise HTTPException(status_code=422, detail="Shift changes can only be asked for up to a week back.")
+    if data.date > date.today() + timedelta(days=90):
+        raise HTTPException(status_code=422, detail="That's more than 3 months away.")
+    sc = ShiftChange(employee_id=emp.id, date=data.date, start=data.start, end=data.end, reason=data.reason)
+    db.add(sc)
+    db.commit()
+    db.refresh(sc)
+    return sc
 
 
 @router.post("/corrections", response_model=CorrectionOut)

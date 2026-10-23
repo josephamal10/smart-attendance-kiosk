@@ -1,4 +1,5 @@
 """The Alembic migrations must build exactly the schema the models describe."""
+from alembic import command
 from alembic.migration import MigrationContext
 from alembic.autogenerate import compare_metadata
 from alembic.script import ScriptDirectory
@@ -36,8 +37,11 @@ def test_fresh_database_matches_the_models():
 
 def test_database_from_before_migrations_is_adopted_without_data_loss():
     engine = _engine()
-    with engine.begin() as conn:  # an old database: baseline tables made by create_all, some data
-        Base.metadata.create_all(conn, tables=[Base.metadata.tables[t] for t in database.BASELINE_TABLES])
+    with engine.begin() as conn:  # an old database: the baseline schema, some data, no version table
+        cfg = Config("alembic.ini")
+        cfg.attributes["connection"] = conn
+        command.upgrade(cfg, database.HEAD_OF_BASELINE)
+        conn.execute(text("drop table alembic_version"))
         conn.execute(text("insert into settings (key, value) values ('company_name', '\"Acme\"')"))
     database.init_db(bind=engine)
     version, diff = _state(engine)

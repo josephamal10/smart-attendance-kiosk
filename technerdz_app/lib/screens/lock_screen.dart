@@ -3,7 +3,9 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import '../i18n/kiosk_text.dart';
 import '../services/api_service.dart';
+import '../services/voice.dart';
 import '../theme/app_theme.dart';
 import '../theme/branding.dart';
 import '../widgets/ui.dart';
@@ -14,6 +16,8 @@ import 'kiosk_screen.dart';
 /// Touch anywhere (or press a key) to open the camera and check in. The two corner icons open
 /// "My dashboard" (by face) and admin sign-in. The camera is only on while someone is scanning.
 class LockScreen extends StatefulWidget {
+  /// Off in the screenshot tool, whose fast-forwarded clock makes network timeouts fire early.
+  static bool pollServer = true;
   const LockScreen({super.key});
   @override
   State<LockScreen> createState() => _LockScreenState();
@@ -24,11 +28,14 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
   Timer? _clock;
   Timer? _refresh;
   Timer? _rotate;
+  Timer? _retry;
   List<Map<String, dynamic>> _notices = [];
   int _notice = 0;
   bool _busy = false; // a screen opened from here is still closing
   bool? _online;      // null until the first check; false shows the "Offline" badge
   int _checks = 0;
+  int _failures = 0;  // in a row; one slow reply shouldn't flash "Offline"
+  List<Map<String, dynamic>> _celebrations = []; // today's birthdays and work anniversaries
   final _focus = FocusNode();
 
   // Slow drifting glow in the background (also keeps pixels from burning in) and the tap hint pulse
@@ -45,14 +52,17 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+    KioskText.lang.addListener(_onLanguage);
     _clock = Timer.periodic(const Duration(seconds: 1), (_) => setState(() => _now = DateTime.now()));
     _loadNotices();
     _checkServer();
     // Every 15 s: is the server there (and what's the company called)? Notices every 5 min.
-    _refresh = Timer.periodic(const Duration(seconds: 15), (_) {
-      _checkServer();
-      if (++_checks % 20 == 0) _loadNotices();
-    });
+    if (LockScreen.pollServer) {
+      _refresh = Timer.periodic(const Duration(seconds: 15), (_) {
+        _checkServer();
+        if (++_checks % 20 == 0) _loadNotices();
+      });
+    }
     _rotate = Timer.periodic(const Duration(seconds: 8), (_) {
       if (_notices.length > 1) setState(() => _notice = (_notice + 1) % _notices.length);
     });
@@ -60,24 +70,42 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    KioskText.lang.removeListener(_onLanguage);
     _clock?.cancel();
     _refresh?.cancel();
     _rotate?.cancel();
+    _retry?.cancel();
     _drift.dispose();
     _pulse.dispose();
     _focus.dispose();
     super.dispose();
   }
 
+  void _onLanguage() => setState(() {});
+
   Future<void> _checkServer() async {
     var ok = true;
     try {
-      final name = await ApiService.companyName();
-      if (name.trim().isNotEmpty) Branding.name.value = name.trim();
+      final info = await ApiService.kioskInfo();
+      final name = (info['company_name'] as String? ?? '').trim();
+      if (name.isNotEmpty) Branding.name.value = name;
+      Voice.enabled = info['voice_greeting'] != false;
+      final c = ((info['celebrations'] as List?) ?? const []).cast<Map<String, dynamic>>();
+      if (mounted && c.toString() != _celebrations.toString()) setState(() => _celebrations = c);
     } catch (_) {
       ok = false;
     }
-    if (!mounted || ok == _online) return;
+    if (!mounted) return;
+    if (!ok) {
+      // Only call it offline after two failed checks in a row; re-check the first failure soon
+      if (++_failures == 1 && LockScreen.pollServer) {
+        _retry = Timer(const Duration(seconds: 3), () { if (mounted) _checkServer(); });
+      }
+      if (_failures < 2) return;
+    } else {
+      _failures = 0;
+    }
+    if (ok == _online) return;
     final cameBack = _online == false && ok;
     setState(() => _online = ok);
     if (cameBack) _loadNotices();
@@ -111,7 +139,13 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
   void _myDashboard() => _open(const KioskScreen(dashboardMode: true));
   void _admin() => _open(const AdminLoginScreen());
 
-  String get _greeting => _now.hour < 12 ? 'Good morning' : _now.hour < 17 ? 'Good afternoon' : 'Good evening';
+  String _date() {
+    try {
+      return DateFormat('EEEE, d MMMM y', KioskText.lang.value.locale).format(_now);
+    } catch (_) {
+      return DateFormat('EEEE, d MMMM y').format(_now); // locale data not loaded (tests)
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -181,27 +215,36 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
         child: Column(children: [
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             const BrandMark(size: 40, onDark: true, subtitle: 'Attendance'),
-            const Spacer(),
-            if (_online == false) ...[_offlineBadge(), const Spacer()],
-            _CornerButton(icon: Icons.person_outline_rounded, label: 'My dashboard',
+            // The offline badge sits in the middle and shrinks (long translations get "...")
+            Expanded(
+              child: _online == false
+                  ? Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: Center(child: _offlineBadge()),
+                    )
+                  : const SizedBox.shrink(),
+            ),
+            _CornerButton(icon: Icons.person_outline_rounded, label: KioskText.t('my_dashboard'),
                 tooltip: 'My dashboard — see your attendance, leave and hours', onTap: _myDashboard),
             const SizedBox(width: 14),
-            _CornerButton(icon: Icons.admin_panel_settings_outlined, label: 'Admin',
+            _CornerButton(icon: Icons.admin_panel_settings_outlined, label: KioskText.t('admin'),
                 tooltip: 'Admin sign-in', onTap: _admin),
           ]),
           Expanded(
             child: Center(
               child: Column(mainAxisSize: MainAxisSize.min, children: [
-                Text(_greeting.toUpperCase(), style: TextStyle(
+                Text(KioskText.greeting(_now).toUpperCase(), style: TextStyle(
                     color: Colors.white.withValues(alpha: 0.6), fontSize: 15, fontWeight: FontWeight.w600,
-                    letterSpacing: 4)),
+                    // wide letter spacing suits Latin capitals but breaks up Tamil and Hindi letters
+                    letterSpacing: KioskText.lang.value == KioskLang.en ? 4 : 0.5)),
                 SizedBox(height: clock * 0.08),
                 _bigClock(clock),
                 SizedBox(height: clock * 0.1),
-                Text(DateFormat('EEEE, d MMMM y').format(_now), style: TextStyle(
+                Text(_date(), style: TextStyle(
                     color: Colors.white.withValues(alpha: 0.8), fontSize: (clock * 0.13).clamp(16.0, 30.0),
                     fontWeight: FontWeight.w500)),
-                SizedBox(height: clock * 0.28),
+                SizedBox(height: clock * (_celebrations.isEmpty ? 0.28 : 0.18)),
+                if (_celebrations.isNotEmpty) ...[_celebrationRow(), SizedBox(height: clock * 0.14)],
                 _tapHint(),
               ]),
             ),
@@ -210,13 +253,72 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
           Row(children: [
             Icon(Icons.lock_outline_rounded, size: 15, color: Colors.white.withValues(alpha: 0.45)),
             const SizedBox(width: 8),
-            Text('Face check-in · your photo is only used to recognise you and is never stored',
-                style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.45))),
+            Expanded(child: Text(KioskText.t('privacy'), overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.45)))),
+            const SizedBox(width: 16),
+            _languagePicker(),
           ]),
         ]),
       ),
     );
   }
+
+  /// English · தமிழ் · हिन्दी — remembered on this PC.
+  Widget _languagePicker() => Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.translate_rounded, size: 16, color: Colors.white.withValues(alpha: 0.5)),
+        const SizedBox(width: 6),
+        for (final l in KioskLang.values)
+          Padding(
+            padding: const EdgeInsets.only(left: 4),
+            child: Material(
+              color: l == KioskText.lang.value ? Colors.white.withValues(alpha: 0.16) : Colors.transparent,
+              borderRadius: BorderRadius.circular(999),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(999),
+                onTap: () => KioskText.set(l),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  child: Text(l.label, style: TextStyle(
+                      color: Colors.white.withValues(alpha: l == KioskText.lang.value ? 1 : 0.6),
+                      fontSize: 13, fontWeight: FontWeight.w600)),
+                ),
+              ),
+            ),
+          ),
+      ]);
+
+  /// "Happy birthday, Arun!" · "Mira — 3 years with us today!"
+  Widget _celebrationRow() => Wrap(
+        alignment: WrapAlignment.center,
+        spacing: 10,
+        runSpacing: 10,
+        children: [
+          for (final c in _celebrations.take(4))
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(999),
+                gradient: LinearGradient(colors: [
+                  const Color(0xFFF59E0B).withValues(alpha: 0.28),
+                  const Color(0xFFEC4899).withValues(alpha: 0.22),
+                ]),
+                border: Border.all(color: const Color(0xFFFCD34D).withValues(alpha: 0.45)),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(c['kind'] == 'birthday' ? Icons.cake_rounded : Icons.celebration_rounded,
+                    color: const Color(0xFFFDE68A), size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  c['kind'] == 'birthday'
+                      ? KioskText.t('birthday', {'name': c['name']})
+                      : KioskText.t(c['years'] == 1 ? 'anniversary_one' : 'anniversary',
+                          {'name': c['name'], 'years': c['years'] ?? 1}),
+                  style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
+                ),
+              ]),
+            ),
+        ],
+      );
 
   /// Shown while the server can't be reached, so nobody scans in vain.
   Widget _offlineBadge() => Tooltip(
@@ -228,11 +330,13 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
             color: const Color(0xFFDC2626).withValues(alpha: 0.9),
             borderRadius: BorderRadius.circular(999),
           ),
-          child: const Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(Icons.cloud_off_rounded, color: Colors.white, size: 18),
-            SizedBox(width: 8),
-            Text('Offline — check-in is unavailable right now',
-                style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.cloud_off_rounded, color: Colors.white, size: 18),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(KioskText.t('offline'), maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+            ),
           ]),
         ),
       );
@@ -267,11 +371,11 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
             borderRadius: BorderRadius.circular(999),
             border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
           ),
-          child: const Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(Icons.touch_app_outlined, color: Colors.white, size: 22),
-            SizedBox(width: 10),
-            Text('Tap anywhere to check in or out',
-                style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600)),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.touch_app_outlined, color: Colors.white, size: 22),
+            const SizedBox(width: 10),
+            Text(KioskText.t('tap_hint'),
+                style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600)),
           ]),
         ),
       );

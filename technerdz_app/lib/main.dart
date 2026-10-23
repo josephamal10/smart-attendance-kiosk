@@ -3,6 +3,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:camera_windows/camera_windows.dart';
+import 'package:intl/date_symbol_data_local.dart';
+import 'i18n/kiosk_text.dart';
 import 'services/api_service.dart';
 import 'services/kiosk_mode.dart';
 import 'theme/app_theme.dart';
@@ -22,6 +24,8 @@ Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   KioskMode.enabled = args.contains('--kiosk');
   await Appearance.load();
+  await initializeDateFormatting(); // Tamil and Hindi dates on the kiosk screens
+  await KioskText.load();
   unawaited(Branding.load()); // company name for the lock screen; doesn't block start-up
   // Native camera plugin only on Windows (the web build is used for UI previews/screenshots)
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) CameraWindows.registerWith();

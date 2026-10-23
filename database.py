@@ -50,7 +50,10 @@ def init_db(bind=engine):
 
 
 def _legacy_upgrade(conn):
-    """Old in-place upgrades for pre-migration databases, up to exactly the baseline schema."""
+    """Old in-place upgrades for pre-migration databases, up to exactly the baseline schema.
+    Tables a very old database may lack (notices, holidays...) are created from the models; that
+    is only right for tables unchanged since the baseline. employees and attendance_logs, which
+    later migrations change, exist in every database this app ever made."""
     from sqlalchemy import inspect, text
     import models  # noqa: F401 — registers the tables on Base
 

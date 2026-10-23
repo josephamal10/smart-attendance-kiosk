@@ -28,6 +28,7 @@ WEB_PORT, API_PORT = 5181, 8001
 
 SHOTS = {
     "lock":             "screen=lock",
+    "lock-tamil":       "screen=lock&lang=ta",
     "kiosk":            "screen=kiosk",
     "admin-login":      "screen=login",
     "overview":         "screen=dashboard&page=overview",
@@ -102,6 +103,7 @@ def main():
             url = f"http://localhost:{WEB_PORT}/?{query.format(priya=priya)}"
             out = os.path.join(OUT_PNG, f"{name}.png")
             subprocess.run([EDGE, "--headless=new", "--disable-gpu", "--hide-scrollbars",
+                            f"--user-data-dir={os.path.join(OUT_WEB, '.edge-profile')}",  # never hand off to an open Edge
                             f"--window-size=1440,{HEIGHT.get(name, 900)}", "--force-device-scale-factor=1.5",
                             "--virtual-time-budget=60000", "--run-all-compositor-stages-before-draw", f"--screenshot={out}", url],
                            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)

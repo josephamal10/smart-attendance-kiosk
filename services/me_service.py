@@ -9,7 +9,7 @@ from datetime import date, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
-from models import AttendanceLog, CorrectionRequest, Employee, Holiday, LeaveRequest, Notice
+from models import AttendanceLog, CorrectionRequest, Employee, Holiday, LeaveRequest, Notice, ShiftChange
 from services import rules as R
 from services.settings_service import get as get_setting
 
@@ -32,7 +32,9 @@ class History:
         self.start = max(joined, self.today - timedelta(days=LOOKBACK_DAYS))
         holidays = R.holidays_between(db, self.start, self.today)
         self.workdays = R.working_days(self.rules, holidays, self.start, self.today)
-        self.leave = R.leave_days(db, emp.id, self.start, self.today).get(emp.id, set())
+        # Leave and work-from-home days are both skipped by streaks and expected hours
+        self.leave = (R.leave_days(db, emp.id, self.start, self.today).get(emp.id, set())
+                      | R.leave_days(db, emp.id, self.start, self.today, wfh=True).get(emp.id, set()))
         self.shift_start, self.shift_end = self.rules.shift_for(emp.category)
         self.logs: dict[date, AttendanceLog] = {}
         self.evals: dict[date, R.Evaluation] = {}
@@ -148,7 +150,7 @@ def leave_balance(db: Session, emp: Employee, year: int | None = None) -> list[d
     pending = {k: 0 for k in LEAVE_LABELS}
     for lr in (db.query(LeaveRequest)
                  .filter(LeaveRequest.employee_id == emp.id,
-                         LeaveRequest.status.in_(("approved", "pending")),
+                         LeaveRequest.status.in_(("approved", "pending")), LeaveRequest.kind != "wfh",
                          LeaveRequest.start_date <= last, LeaveRequest.end_date >= first)
                  .all()):
         days = len(R.working_days(rules, holidays, max(lr.start_date, first), min(lr.end_date, last)))
@@ -175,7 +177,8 @@ def updates(db: Session, emp: Employee, days: int = 30) -> list[dict]:
                          (LeaveRequest.created_at >= since) | (LeaveRequest.decided_at >= since))
                  .all()):
         span = _fmt(lr.start_date) if lr.start_date == lr.end_date else f"{_fmt(lr.start_date)} – {_fmt(lr.end_date)}"
-        items.append({"type": "leave", "title": f"{LEAVE_LABELS.get(lr.kind, 'Other')} leave, {span}",
+        what = "Work from home" if lr.kind == "wfh" else f"{LEAVE_LABELS.get(lr.kind, 'Other')} leave"
+        items.append({"type": "wfh" if lr.kind == "wfh" else "leave", "title": f"{what}, {span}",
                       "status": lr.status, "at": _naive(lr.decided_at or lr.created_at)})
     for cr in (db.query(CorrectionRequest)
                  .filter(CorrectionRequest.employee_id == emp.id,
@@ -184,6 +187,12 @@ def updates(db: Session, emp: Employee, days: int = 30) -> list[dict]:
         items.append({"type": "correction",
                       "title": f"{CORRECTION_LABELS.get(cr.kind, 'Problem')} on {_fmt(cr.date)}",
                       "status": cr.status, "at": _naive(cr.resolved_at or cr.created_at)})
+    for sc in (db.query(ShiftChange)
+                 .filter(ShiftChange.employee_id == emp.id,
+                         (ShiftChange.created_at >= since) | (ShiftChange.decided_at >= since))
+                 .all()):
+        items.append({"type": "shift", "title": f"Shift {sc.start}–{sc.end} on {_fmt(sc.date)}",
+                      "status": sc.status, "at": _naive(sc.decided_at or sc.created_at)})
     items.sort(key=lambda i: i["at"], reverse=True)
     return items[:10]
 

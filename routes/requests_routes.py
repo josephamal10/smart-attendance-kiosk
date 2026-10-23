@@ -7,15 +7,15 @@ from sqlalchemy.orm import Session
 
 from auth import require_admin, require_super
 from database import get_db
-from models import CorrectionRequest, Employee, Holiday, LeaveRequest
+from models import CorrectionRequest, Employee, Holiday, LeaveRequest, ShiftChange
 from schemas import (AdminLeaveIn, CorrectionDecision, CorrectionOut, Decision,
-                     HolidayIn, HolidayOut, LeaveOut)
+                     HolidayIn, HolidayOut, LeaveOut, ShiftChangeOut)
 from services import audit
 
 router = APIRouter(prefix="/admin", tags=["Requests"], dependencies=[Depends(require_admin)])
 
 _KIND = {"missed_checkout": "forgot check-out", "wrong_time": "wrong time", "other": "other",
-         "sick": "sick leave", "casual": "casual leave"}
+         "sick": "sick leave", "casual": "casual leave", "wfh": "work from home"}
 
 
 def _d(d: date) -> str:
@@ -118,3 +118,27 @@ def decide_correction(request_id: int, data: CorrectionDecision, db: Session = D
     db.commit()
     db.refresh(cr)
     return cr
+
+
+# ── One-day shift changes (from employees) ───────────────────────────────────
+
+@router.get("/shift-changes", response_model=list[ShiftChangeOut])
+def list_shift_changes(status: str | None = Query(None, pattern="^(pending|approved|rejected)$"),
+                       db: Session = Depends(get_db)):
+    q = db.query(ShiftChange)
+    if status:
+        q = q.filter(ShiftChange.status == status)
+    return q.order_by(ShiftChange.created_at.desc()).all()
+
+@router.post("/shift-changes/{change_id}/decision", response_model=ShiftChangeOut)
+def decide_shift_change(change_id: int, data: Decision, db: Session = Depends(get_db),
+                        admin: Employee = Depends(require_super)):
+    sc = db.get(ShiftChange, change_id)
+    if not sc:
+        raise HTTPException(status_code=404, detail="Shift change not found")
+    sc.status, sc.decided_at, sc.decided_by = data.status, datetime.now(), admin.id
+    audit.record(db, admin, f"shift_change.{data.status}", employee_id=sc.employee_id,
+                 details=f"{_d(sc.date)}: {sc.start}–{sc.end}", reason=sc.reason)
+    db.commit()
+    db.refresh(sc)
+    return sc

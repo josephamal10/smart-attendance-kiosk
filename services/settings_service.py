@@ -23,6 +23,10 @@ DEFAULTS: dict[str, Any] = {
     "hr_emails":            [],       # who gets the daily summary
     "email_enabled":        False,
     "email_time":           "19:00",
+    "monthly_register_email": True,   # on the 1st, email last month's Excel register to HR
+    "show_celebrations":    True,     # birthdays and work anniversaries on the lock screen
+    "voice_greeting":       True,     # the kiosk says "Good morning, Priya" after a check-in
+    "last_register_month":  "",       # internal: last month whose register was emailed
     "last_email_date":      "",       # internal: stops the summary going out twice a day
     "last_backup_date":     "",       # internal: one automatic backup per day
 }

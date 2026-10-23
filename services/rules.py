@@ -10,7 +10,7 @@ from datetime import date, datetime, time, timedelta
 
 from sqlalchemy.orm import Session
 
-from models import AttendanceLog, Holiday, LeaveRequest
+from models import AttendanceLog, Holiday, LeaveRequest, ShiftChange
 from services.settings_service import get_all, parse_hhmm
 
 
@@ -23,6 +23,8 @@ class Rules:
     weekend: set[int]
     # ...unless a team has its own shift: {"Developer": (10:00, 19:00)}
     shifts: dict[str, tuple[time, time]] = field(default_factory=dict)
+    # ...unless someone got a one-day shift change approved: {(employee_id, date): (11:00, 20:00)}
+    overrides: dict[tuple[int, date], tuple[time, time]] = field(default_factory=dict)
 
     @classmethod
     def load(cls, db: Session) -> "Rules":
@@ -35,9 +37,15 @@ class Rules:
             weekend=set(s["weekend_days"]),
             shifts={team: (parse_hhmm(v["start"]), parse_hhmm(v["end"]))
                     for team, v in (s.get("team_shifts") or {}).items()},
+            overrides={(c.employee_id, c.date): (parse_hhmm(c.start), parse_hhmm(c.end))
+                       for c in db.query(ShiftChange).filter(ShiftChange.status == "approved")
+                                  .order_by(ShiftChange.decided_at).all()},  # newest approval wins
         )
 
-    def shift_for(self, team: str | None) -> tuple[time, time]:
+    def shift_for(self, team: str | None, employee_id: int | None = None,
+                  day: date | None = None) -> tuple[time, time]:
+        if employee_id is not None and (employee_id, day) in self.overrides:
+            return self.overrides[(employee_id, day)]
         return self.shifts.get(team or "", (self.start, self.end))
 
 
@@ -58,7 +66,7 @@ def evaluate(log: AttendanceLog, rules: Rules, team: str | None = None) -> Evalu
     day = log.in_time.date()
     if team is None and log.employee is not None:
         team = log.employee.category
-    shift_start, shift_end = rules.shift_for(team)
+    shift_start, shift_end = rules.shift_for(team, log.employee_id, day)
 
     # Late: after start + grace. Minutes late are counted from the start time itself.
     start = datetime.combine(day, shift_start)
@@ -90,12 +98,15 @@ def holidays_between(db: Session, start: date, end: date) -> dict[date, str]:
     return {h.date: h.name for h in rows}
 
 
-def leave_days(db: Session, employee_id: int | None, start: date, end: date) -> dict[int, set[date]]:
-    """Approved leave days per employee within [start, end]."""
+def leave_days(db: Session, employee_id: int | None, start: date, end: date,
+               wfh: bool = False) -> dict[int, set[date]]:
+    """Approved leave days per employee within [start, end]. With wfh=True, approved
+    work-from-home days instead (those count as attended, not as leave)."""
     q = db.query(LeaveRequest).filter(
         LeaveRequest.status == "approved",
         LeaveRequest.start_date <= end,
         LeaveRequest.end_date >= start,
+        (LeaveRequest.kind == "wfh") if wfh else (LeaveRequest.kind != "wfh"),
     )
     if employee_id is not None:
         q = q.filter(LeaveRequest.employee_id == employee_id)

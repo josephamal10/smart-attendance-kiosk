@@ -2,11 +2,12 @@
 Background jobs, run every few minutes while the server is up:
   * auto check-out: close any day someone forgot to check out of
   * daily email: send HR the summary once, after the configured time
+  * monthly email: on the 1st, last month's Excel register
 Each job is a plain function (easy to test); `run_forever` just calls them on a timer.
 """
 import asyncio
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
@@ -30,7 +31,8 @@ def auto_checkout(db: Session, now: datetime | None = None) -> int:
                    .all())
     for l in open_logs:
         team = l.employee.category if l.employee else None
-        end = datetime.combine(date.fromisoformat(l.date), rules.shift_for(team)[1])
+        day = date.fromisoformat(l.date)
+        end = datetime.combine(day, rules.shift_for(team, l.employee_id, day)[1])
         l.out_time = max(end, l.in_time)  # someone who came in after hours: zero-length day
         l.auto_checkout = True
         audit.record(db, None, "attendance.auto_checkout", employee_id=l.employee_id,
@@ -50,6 +52,24 @@ def maybe_send_daily_email(db: Session, now: datetime | None = None) -> str | No
     result = email_service.send_daily_summary(db, now.date(), s["hr_emails"])
     settings_service.put(db, "last_email_date", now.date().isoformat())
     audit.record(db, None, "email.daily_summary", details=result)
+    db.commit()
+    return result
+
+
+def maybe_send_monthly_register(db: Session, now: datetime | None = None) -> str | None:
+    """Once a month (from the 1st, after the email time), send HR last month's register."""
+    now = now or datetime.now()
+    s = settings_service.get_all(db)
+    first = now.date().replace(day=1)
+    last_month = (first - timedelta(days=1)).replace(day=1)
+    key = f"{last_month:%Y-%m}"
+    if not (s["email_enabled"] and s["monthly_register_email"]) or s["last_register_month"] == key:
+        return None
+    if now.time() < settings_service.parse_hhmm(s["email_time"]):
+        return None
+    result = email_service.send_monthly_register(db, last_month.year, last_month.month, s["hr_emails"])
+    settings_service.put(db, "last_register_month", key)
+    audit.record(db, None, "email.monthly_register", details=f"{last_month:%B %Y}: {result}")
     db.commit()
     return result
 
@@ -74,6 +94,9 @@ def run_jobs() -> None:
         sent = maybe_send_daily_email(db)
         if sent:
             log.info("daily summary: %s", sent)
+        monthly = maybe_send_monthly_register(db)
+        if monthly:
+            log.info("monthly register: %s", monthly)
         saved = maybe_backup(db)
         if saved:
             log.info("database backed up to %s", saved)

@@ -49,7 +49,7 @@ def main():
     from sqlalchemy.orm import sessionmaker
     from database import init_db
     from models import (AttendanceLog, CorrectionRequest, Employee, FaceImage, Holiday,
-                        LeaveRequest, NO_PASSWORD, Notice)
+                        LeaveRequest, NO_PASSWORD, Notice, ShiftChange)
     from services import audit, settings_service
     from auth import hash_password
 
@@ -134,6 +134,19 @@ def main():
     db.add(CorrectionRequest(employee_id=priya.id, date=today - timedelta(days=16), kind="wrong_time",
                              note="Scanned twice by mistake", status="resolved",
                              created_at=datetime.now() - timedelta(days=15), resolved_at=datetime.now() - timedelta(days=14)))
+    # Celebrations on the lock screen today, work from home, and a shift change waiting for approval
+    emps[3].birthday = today.replace(year=1997)            # Divya
+    emps[4].joined_on = today.replace(year=today.year - 3)  # Rahul: 3 years today
+    for e in emps:
+        e.joined_on = e.joined_on or (today - timedelta(days=rng.randint(200, 1500)))
+    wfh_day = today - timedelta(days=today.weekday() + 3)   # last week's Friday
+    db.add(LeaveRequest(employee_id=priya.id, start_date=wfh_day, end_date=wfh_day, kind="wfh",
+                        reason="Waiting for a delivery", status="approved", decided_by=admin.id,
+                        created_at=datetime.now() - timedelta(days=9), decided_at=datetime.now() - timedelta(days=8)))
+    db.query(AttendanceLog).filter(AttendanceLog.employee_id == priya.id,
+                                   AttendanceLog.date == wfh_day.isoformat()).delete()
+    db.add(ShiftChange(employee_id=emps[2].id, date=_next_weekday(today + timedelta(days=1)), start="11:30",
+                       end="20:30", reason="Hospital appointment in the morning"))
     db.add(Notice(title="Diwali party on Friday", body="4 PM in the cafeteria. Snacks and games — everyone welcome!",
                   pinned=True, created_by="Demo Admin"))
     db.add(Notice(title="New team shifts", body="Developers now work 10 AM – 7 PM. Everyone else stays 9 – 6.",

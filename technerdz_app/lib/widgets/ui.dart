@@ -375,10 +375,11 @@ class DayStatus {
         'leave'    => (AppTheme.primarySoft, AppTheme.primary, 'LV', 'Leave'),
         'holiday'  => (AppTheme.neutralSoft, AppTheme.textSecondary, 'H', 'Holiday'),
         'off'      => (AppTheme.surfaceMuted, AppTheme.textMuted, '', 'Day off'),
+        'wfh'      => (AppTheme.tealSoft, AppTheme.teal, 'W', 'Work from home'),
         _          => (Colors.transparent, AppTheme.textMuted, '', 'Upcoming'),
       };
 
-  static const legendOrder = ['present', 'late', 'half_day', 'absent', 'leave', 'holiday', 'off'];
+  static const legendOrder = ['present', 'late', 'half_day', 'wfh', 'absent', 'leave', 'holiday', 'off'];
 }
 
 class DayLegend extends StatelessWidget {

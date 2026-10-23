@@ -10,8 +10,10 @@ an admin dashboard (desktop and **web**) and a personal dashboard for every empl
 | Lock screen (tap anywhere to check in) | Camera check-in |
 |---|---|
 | ![Lock screen](docs/screenshots/lock.png) | ![Kiosk check-in](docs/screenshots/kiosk.png) |
-| **Admin overview** | **Notice board** (shown on the lock screen) |
-| ![Overview](docs/screenshots/overview.png) | ![Notice board](docs/screenshots/notices.png) |
+| **Lock screen in Tamil** (also Hindi, English) with today's birthdays | **Admin overview** |
+| ![Lock screen in Tamil](docs/screenshots/lock-tamil.png) | ![Overview](docs/screenshots/overview.png) |
+| **Notice board** (shown on the lock screen) | |
+| ![Notice board](docs/screenshots/notices.png) | |
 | **Monthly register** (exports to Excel) | **Employee profile** |
 | ![Monthly register](docs/screenshots/register.png) | ![Employee profile](docs/screenshots/profile.png) |
 | **Analytics** | **Dark mode** |
@@ -79,7 +81,9 @@ and auto check-out all follow it.
 | **On-time streak** and badges (Perfect week, Early bird, Extra mile...) | **Notice board**: posts appear on the kiosk and in every dashboard |
 | Notices, replies to my requests, my team's leave today, upcoming holidays | Analytics: daily on-time vs late, arrival trend, late by team, punctuality |
 | **Monthly PDF report** via a QR code — downloads on your phone, nothing saved on the kiosk | Audit log of every admin and system action |
-| Request leave, report a missed check-out | Monthly register (P/L/A/LV/H grid, overtime) with **Excel export** and per-employee profiles |
+| Request leave or **work from home**, ask for a **different shift for one day**, report a missed check-out | Monthly register (P/L/W/A/LV/H grid, overtime) with **Excel export** and per-employee profiles |
+| Kiosk in **English, Tamil or Hindi**; a **spoken greeting** ("Good morning, Priya. You're checked in.") | Approve work from home (counts as attended) and one-day shift changes (that day uses the new hours) |
+| **Birthdays and work anniversaries** celebrated on the lock screen | HR gets last month's register **emailed as Excel on the 1st** |
 | Closes itself after 90 s idle | **Admin accounts** with roles; **web dashboard** for HR's own computers |
 | | Settings: office hours, **team shifts**, grace, half day, days off, **leave allowance**, HR email, backups, dark mode |
 
@@ -125,7 +129,7 @@ pip install -r requirements-dev.txt
 copy .env.example .env          # then set SECRET_KEY
 python scripts/create_admin.py --username admin --name "Admin"
 uvicorn main:app --reload       # API docs at http://127.0.0.1:8000/docs
-pytest                          # 123 tests, no camera needed
+pytest                          # 135 tests, no camera needed
 ```
 
 **App** (Flutter, Windows desktop):

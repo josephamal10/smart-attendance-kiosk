@@ -134,6 +134,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         ApiService.getLeave(status: 'pending'),
         ApiService.getCorrections(status: 'pending'),
         ApiService.getLeave(status: 'approved'),
+        ApiService.getShiftChanges(status: 'pending'),
         if (_categories.isEmpty) ApiService.getCategories(),
       ]);
       final emps = results[2] as List<Employee>;
@@ -141,12 +142,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
       if (!mounted) return;
       setState(() {
         _updatedAt = DateTime.now();
-        if (results.length > 7) _categories = results[7] as List<String>;
-        _pending = results[4].length + results[5].length;
+        if (results.length > 8) _categories = results[8] as List<String>;
+        _pending = results[4].length + results[5].length + results[7].length;
         final today = DateTime.now();
         final day = DateTime(today.year, today.month, today.day);
         _onLeaveToday = (results[6] as List<LeaveRequest>)
-            .where((l) => !l.startDate.isAfter(day) && !l.endDate.isBefore(day))
+            .where((l) => l.kind != 'wfh' && !l.startDate.isAfter(day) && !l.endDate.isBefore(day))
             .map((l) => l.employeeId).toSet().length;
         _todayLogs = (results[0] as List<AttendanceLog>)
           ..sort((a, b) => (b.inTime ?? DateTime(0)).compareTo(a.inTime ?? DateTime(0)));
@@ -611,7 +612,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
             borderRadius: BorderRadius.circular(AppTheme.radiusSm),
             onTap: () => setState(() => _page = _Page.requests),
             child: InfoBanner('$_pending request${_pending == 1 ? '' : 's'} waiting for you — '
-                'leave or attendance corrections. Click to review.', tone: Tone.primary),
+                'leave, work from home, shift changes or corrections. Click to review.', tone: Tone.primary),
           ),
         ),
       ],
@@ -990,6 +991,8 @@ class _EmployeeDialogState extends State<_EmployeeDialog> {
   late final _name = TextEditingController(text: widget.employee?.name);
   late String? _category = widget.employee?.category;
   late bool _active = widget.employee?.isActive ?? true;
+  late DateTime? _birthday = widget.employee?.birthday;
+  late DateTime? _joinedOn = widget.employee?.joinedOn;
   bool _saving = false;
   String? _error;
 
@@ -1010,8 +1013,9 @@ class _EmployeeDialogState extends State<_EmployeeDialog> {
     setState(() { _saving = true; _error = null; });
     try {
       final saved = _editing
-          ? await ApiService.updateEmployee(widget.employee!.id, name: name, category: _category, isActive: _active)
-          : await ApiService.createEmployee(name, _category!);
+          ? await ApiService.updateEmployee(widget.employee!.id, name: name, category: _category, isActive: _active,
+              birthday: _birthday, joinedOn: _joinedOn)
+          : await ApiService.createEmployee(name, _category!, birthday: _birthday, joinedOn: _joinedOn);
       if (mounted) Navigator.pop(context, saved);
     } on ApiException catch (e) {
       setState(() => _error = e.message);
@@ -1021,6 +1025,25 @@ class _EmployeeDialogState extends State<_EmployeeDialog> {
       if (mounted) setState(() => _saving = false);
     }
   }
+
+  Widget _dateField(String label, DateTime? value, ValueChanged<DateTime?> onChanged,
+      {required DateTime first, required DateTime last}) =>
+      OutlinedButton(
+        onPressed: () async {
+          final d = await showDatePicker(context: context, initialDate: value ?? DateTime(2000, 1, 1),
+              firstDate: first, lastDate: last, initialEntryMode: DatePickerEntryMode.input);
+          if (d != null) onChanged(d);
+        },
+        style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14)),
+        child: Row(children: [
+          Icon(label == 'Birthday' ? Icons.cake_outlined : Icons.work_history_outlined, size: 18),
+          const SizedBox(width: 8),
+          Expanded(child: Text(value == null ? label : DateFormat('d MMM y').format(value),
+              overflow: TextOverflow.ellipsis)),
+          if (value != null)
+            InkWell(onTap: () => onChanged(null), child: const Icon(Icons.close, size: 16)),
+        ]),
+      );
 
   static const _icons = {
     'HR': Icons.diversity_3_outlined,
@@ -1074,6 +1097,16 @@ class _EmployeeDialogState extends State<_EmployeeDialog> {
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
               ),
+          ]),
+          const SizedBox(height: 20),
+          Text('Celebrated on the kiosk (optional)', style: AppTheme.label),
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(child: _dateField('Birthday', _birthday, (d) => setState(() => _birthday = d),
+                first: DateTime(1940), last: DateTime.now())),
+            const SizedBox(width: 10),
+            Expanded(child: _dateField('Joined on', _joinedOn, (d) => setState(() => _joinedOn = d),
+                first: DateTime(1990), last: DateTime.now())),
           ]),
           if (_editing) ...[
             const SizedBox(height: 20),

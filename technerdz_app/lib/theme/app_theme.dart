@@ -36,6 +36,8 @@ class AppTheme {
   static Color get warningSoft   => _p(0xFFFFFAEB, 0xFF2D2312);
   static Color get danger        => _p(0xFFDC2626, 0xFFEF5350);
   static Color get dangerSoft    => _p(0xFFFEF3F2, 0xFF2E1517);
+  static Color get teal          => _p(0xFF0D9488, 0xFF2DD4BF);  // work from home
+  static Color get tealSoft      => _p(0xFFE6FAF7, 0xFF0F2A27);
 
   // ── Chart series (validated for colour-blind separation on both surfaces) ──
   static Color get chartOnTime   => _p(0xFF2A78D6, 0xFF3987E5);

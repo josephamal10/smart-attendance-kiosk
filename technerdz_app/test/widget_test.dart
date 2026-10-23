@@ -26,7 +26,12 @@ void main() {
   testWidgets('Lock screen warns when the server cannot be reached', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1366, 768));
     await tester.pumpWidget(const MaterialApp(home: LockScreen()));
-    // Tests have no server: every request fails, so the badge appears after the first check
+    // Tests have no server: every request fails. One failure isn't enough (could be a blip)...
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
+    await tester.pump();
+    expect(find.textContaining('Offline'), findsNothing);
+    // ...the quick re-check 3 s later fails too, and then the badge appears
+    await tester.pump(const Duration(seconds: 4));
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
     await tester.pump();
     expect(find.textContaining('Offline'), findsOneWidget);
@@ -183,5 +188,31 @@ void main() {
     expect(ApiService.canEdit, isTrue);
     expect(ApiService.canRegisterFaces, isTrue); // tests run on the desktop VM, not web
     ApiService.clearSession();
+  });
+
+  testWidgets('The lock screen speaks Tamil and Hindi too', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1366, 768));
+    await tester.pumpWidget(const MaterialApp(home: LockScreen()));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('தமிழ்'));
+    await tester.pump();
+    expect(find.text('வருகையைப் பதிவு செய்ய திரையில் எங்கும் தொடவும்'), findsOneWidget);
+    await tester.tap(find.text('हिन्दी'));
+    await tester.pump();
+    expect(find.text('हाज़िरी लगाने के लिए स्क्रीन पर कहीं भी छुएँ'), findsOneWidget);
+    await tester.tap(find.text('English'));
+    await tester.pump();
+    expect(find.text('Tap anywhere to check in or out'), findsOneWidget);
+    await tester.binding.setSurfaceSize(null);
+  });
+
+  test('Spoken greetings say who, and whether they were late', () {
+    final morning = DateTime(2026, 10, 23, 9, 20);
+    expect(KioskScreenSpeech.of({'name': 'Priya Raman', 'action': 'in', 'flags': <String>[]}, morning),
+        "Good morning, Priya. You're checked in.");
+    expect(KioskScreenSpeech.of({'name': 'Priya Raman', 'action': 'in', 'flags': ['late'], 'late_minutes': 12}, morning),
+        "Good morning, Priya. You're checked in, 12 minutes late.");
+    expect(KioskScreenSpeech.of({'name': 'Arun', 'action': 'out'}, DateTime(2026, 10, 23, 18, 5)),
+        'Goodbye, Arun. See you tomorrow.');
   });
 }

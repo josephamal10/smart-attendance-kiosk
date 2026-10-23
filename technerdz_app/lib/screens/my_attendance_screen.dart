@@ -99,6 +99,23 @@ class _MyAttendanceScreenState extends State<MyAttendanceScreen> {
     }
   }
 
+  Future<void> _workFromHome() async {
+    final ok = await showDialog<bool>(context: context,
+        builder: (_) => _LeaveDialog(token: widget.token, workFromHome: true));
+    if (ok == true && mounted) {
+      _toast('Work-from-home request sent. Approved days count as attended.');
+      _load();
+    }
+  }
+
+  Future<void> _changeShift() async {
+    final ok = await showDialog<bool>(context: context, builder: (_) => _ShiftDialog(token: widget.token));
+    if (ok == true && mounted) {
+      _toast('Shift change sent. Once approved, that day uses your new hours.');
+      _load();
+    }
+  }
+
   Future<void> _reportProblem() async {
     final ok = await showDialog<bool>(context: context, builder: (_) => _ProblemDialog(token: widget.token));
     if (ok == true && mounted) {
@@ -545,7 +562,12 @@ class _MyAttendanceScreenState extends State<MyAttendanceScreen> {
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 5),
             child: Row(children: [
-              Icon(u['type'] == 'leave' ? Icons.beach_access_outlined : Icons.build_outlined,
+              Icon(switch (u['type']) {
+                    'leave' => Icons.beach_access_outlined,
+                    'wfh' => Icons.home_work_outlined,
+                    'shift' => Icons.swap_horiz_rounded,
+                    _ => Icons.build_outlined,
+                  },
                   size: 18, color: AppTheme.textMuted),
               const SizedBox(width: 8),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -651,6 +673,20 @@ class _MyAttendanceScreenState extends State<MyAttendanceScreen> {
             label: const Text('Request leave'),
           ),
           const SizedBox(height: 10),
+          Row(children: [
+            Expanded(child: OutlinedButton.icon(
+              onPressed: _workFromHome,
+              icon: const Icon(Icons.home_work_outlined, size: 18),
+              label: const Text('Work from home'),
+            )),
+            const SizedBox(width: 10),
+            Expanded(child: OutlinedButton.icon(
+              onPressed: _changeShift,
+              icon: const Icon(Icons.swap_horiz_rounded, size: 18),
+              label: const Text('Change my shift'),
+            )),
+          ]),
+          const SizedBox(height: 10),
           OutlinedButton.icon(
             onPressed: _reportProblem,
             icon: const Icon(Icons.report_outlined, size: 18),
@@ -670,14 +706,15 @@ String _statusText(String s) => switch (s) {
 
 class _LeaveDialog extends StatefulWidget {
   final String token;
-  const _LeaveDialog({required this.token});
+  final bool workFromHome; // same request, kind "wfh": counts as attended, not leave
+  const _LeaveDialog({required this.token, this.workFromHome = false});
   @override
   State<_LeaveDialog> createState() => _LeaveDialogState();
 }
 
 class _LeaveDialogState extends State<_LeaveDialog> {
   DateTimeRange? _range;
-  String _kind = 'casual';
+  late String _kind = widget.workFromHome ? 'wfh' : 'casual';
   final _reason = TextEditingController();
   bool _saving = false;
   String? _error;
@@ -721,10 +758,15 @@ class _LeaveDialogState extends State<_LeaveDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-        title: const Text('Request leave'),
+        title: Text(widget.workFromHome ? 'Work from home' : 'Request leave'),
         content: SizedBox(
           width: 420,
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            if (widget.workFromHome) ...[
+              Text('Approved work-from-home days count as attended and don\'t use your leave.',
+                  style: AppTheme.muted),
+              const SizedBox(height: 16),
+            ],
             Text('Dates', style: AppTheme.label),
             const SizedBox(height: 6),
             OutlinedButton.icon(
@@ -732,6 +774,7 @@ class _LeaveDialogState extends State<_LeaveDialog> {
               icon: const Icon(Icons.date_range_outlined, size: 18),
               label: Text(_range == null ? 'Choose dates' : _rangeText(_range!)),
             ),
+            if (!widget.workFromHome) ...[
             const SizedBox(height: 16),
             Text('Type', style: AppTheme.label),
             const SizedBox(height: 6),
@@ -745,6 +788,7 @@ class _LeaveDialogState extends State<_LeaveDialog> {
               showSelectedIcon: false,
               onSelectionChanged: (s) => setState(() => _kind = s.first),
             ),
+            ],
             const SizedBox(height: 16),
             Text('Reason (optional)', style: AppTheme.label),
             const SizedBox(height: 6),
@@ -840,6 +884,104 @@ class _ProblemDialogState extends State<_ProblemDialog> {
         actions: [
           OutlinedButton(onPressed: _saving ? null : () => Navigator.pop(context), child: const Text('Cancel')),
           ElevatedButton(onPressed: _saving ? null : _send, child: const Text('Send to admin')),
+        ],
+      );
+}
+
+class _ShiftDialog extends StatefulWidget {
+  final String token;
+  const _ShiftDialog({required this.token});
+  @override
+  State<_ShiftDialog> createState() => _ShiftDialogState();
+}
+
+/// "Can I work 11 to 8 on Friday?" — one day, different hours. Approved by the admin.
+class _ShiftDialogState extends State<_ShiftDialog> {
+  DateTime _date = DateTime.now();
+  TimeOfDay _start = const TimeOfDay(hour: 10, minute: 0);
+  TimeOfDay _end = const TimeOfDay(hour: 19, minute: 0);
+  final _reason = TextEditingController();
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _reason.dispose();
+    super.dispose();
+  }
+
+  String _hhmm(TimeOfDay t) => '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+
+  Future<void> _send() async {
+    if (_end.hour * 60 + _end.minute <= _start.hour * 60 + _start.minute) {
+      setState(() => _error = 'The end time must be after the start time.');
+      return;
+    }
+    setState(() { _saving = true; _error = null; });
+    try {
+      await ApiService.requestShiftChange(widget.token, _date, _hhmm(_start), _hhmm(_end), _reason.text.trim());
+      if (mounted) Navigator.pop(context, true);
+    } on ApiException catch (e) {
+      setState(() => _error = e.message);
+    } catch (_) {
+      setState(() => _error = 'Could not reach the server.');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Widget _time(String label, TimeOfDay value, ValueChanged<TimeOfDay> onPicked) => Expanded(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text(label, style: AppTheme.label),
+          const SizedBox(height: 6),
+          OutlinedButton.icon(
+            onPressed: () async {
+              final t = await showTimePicker(context: context, initialTime: value);
+              if (t != null) onPicked(t);
+            },
+            icon: const Icon(Icons.schedule, size: 18),
+            label: Text(value.format(context)),
+          ),
+        ]),
+      );
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: const Text('Change my shift for a day'),
+        content: SizedBox(
+          width: 420,
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('Once approved, late, early leave and overtime that day use these hours.', style: AppTheme.muted),
+            const SizedBox(height: 16),
+            Text('Which day?', style: AppTheme.label),
+            const SizedBox(height: 6),
+            OutlinedButton.icon(
+              onPressed: () async {
+                final now = DateTime.now();
+                final d = await showDatePicker(context: context, initialDate: _date,
+                    firstDate: now.subtract(const Duration(days: 7)), lastDate: now.add(const Duration(days: 90)));
+                if (d != null) setState(() => _date = d);
+              },
+              icon: const Icon(Icons.event_outlined, size: 18),
+              label: Text(DateFormat('EEEE, d MMM y').format(_date)),
+            ),
+            const SizedBox(height: 16),
+            Row(children: [
+              _time('From', _start, (t) => setState(() => _start = t)),
+              const SizedBox(width: 12),
+              _time('To', _end, (t) => setState(() => _end = t)),
+            ]),
+            const SizedBox(height: 16),
+            Text('Reason (optional)', style: AppTheme.label),
+            const SizedBox(height: 6),
+            TextField(controller: _reason, maxLines: 2,
+                decoration: const InputDecoration(hintText: 'e.g. Doctor\'s appointment in the morning')),
+            if (_error != null) ...[const SizedBox(height: 14), InfoBanner(_error!)],
+          ]),
+        ),
+        actions: [
+          OutlinedButton(onPressed: _saving ? null : () => Navigator.pop(context), child: const Text('Cancel')),
+          ElevatedButton(onPressed: _saving ? null : _send, child: const Text('Send request')),
         ],
       );
 }

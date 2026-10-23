@@ -229,16 +229,20 @@ class ApiService {
     return data.cast<String>();
   }
 
-  static Future<Employee> createEmployee(String name, String category) async {
+  static Future<Employee> createEmployee(String name, String category,
+      {DateTime? birthday, DateTime? joinedOn}) async {
     return Employee.fromJson(_handle(await http.post(
       _uri('/admin/employees'),
       headers: _headers,
-      body: jsonEncode({'name': name, 'category': category}),
+      body: jsonEncode({'name': name, 'category': category,
+          'birthday': birthday == null ? null : ymd(birthday),
+          'joined_on': joinedOn == null ? null : ymd(joinedOn)}),
     )));
   }
 
+  /// Birthday and join date are always sent (null clears them).
   static Future<Employee> updateEmployee(int id,
-      {String? name, String? category, bool? isActive}) async {
+      {String? name, String? category, bool? isActive, DateTime? birthday, DateTime? joinedOn}) async {
     return Employee.fromJson(_handle(await http.patch(
       _uri('/admin/employees/$id'),
       headers: _headers,
@@ -246,6 +250,8 @@ class ApiService {
         if (name != null) 'name': name,
         if (category != null) 'category': category,
         if (isActive != null) 'is_active': isActive,
+        'birthday': birthday == null ? null : ymd(birthday),
+        'joined_on': joinedOn == null ? null : ymd(joinedOn),
       }),
     )));
   }
@@ -391,10 +397,24 @@ class ApiService {
         _uri('/me/report-link', {'year': '${month.year}', 'month': '${month.month}'}), headers: _self(token))));
   }
 
-  /// The company name from the server's settings (public: shown before anyone signs in).
-  static Future<String> companyName() async {
+  /// What the lock screen needs before anyone signs in: company name, today's birthdays and
+  /// work anniversaries, and whether to speak greetings.
+  static Future<Map<String, dynamic>> kioskInfo() async {
     final res = await http.get(_uri('/kiosk/info')).timeout(const Duration(seconds: 8));
-    return (_handleSelf(res) as Map)['company_name'] as String;
+    return Map<String, dynamic>.from(_handleSelf(res));
+  }
+
+  static Future<String> companyName() async => (await kioskInfo())['company_name'] as String;
+
+  // ── One-day shift changes (admin) ────────────────────
+  static Future<List<Map<String, dynamic>>> getShiftChanges({String? status}) async {
+    return (_handle(await http.get(_uri('/admin/shift-changes', {'status': status}), headers: _headers)) as List)
+        .cast<Map<String, dynamic>>();
+  }
+
+  static Future<void> decideShiftChange(int id, bool approve) async {
+    _handle(await http.post(_uri('/admin/shift-changes/$id/decision'), headers: _headers,
+        body: jsonEncode({'status': approve ? 'approved' : 'rejected'})));
   }
 
   // ── Notices ──────────────────────────────────────────
@@ -442,6 +462,12 @@ class ApiService {
   static Future<void> requestLeave(String token, DateTime start, DateTime end, String kind, String reason) async {
     _handleSelf(await http.post(_uri('/me/leave'), headers: _self(token), body: jsonEncode({
       'start_date': ymd(start), 'end_date': ymd(end), 'kind': kind, 'reason': reason,
+    })));
+  }
+
+  static Future<void> requestShiftChange(String token, DateTime date, String start, String end, String reason) async {
+    _handleSelf(await http.post(_uri('/me/shift-change'), headers: _self(token), body: jsonEncode({
+      'date': ymd(date), 'start': start, 'end': end, 'reason': reason,
     })));
   }
 

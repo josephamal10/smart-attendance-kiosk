@@ -5,6 +5,7 @@ Cell statuses (in priority order for a day):
   holiday  company holiday (unless the person worked, then it's their attendance)
   off      weekly day off (same exception)
   leave    approved leave
+  wfh      approved work from home (counts as attended)
   present / late / half_day   from the check-in record and the work rules
   absent   a past working day with no record and no leave
   future   not happened yet
@@ -18,7 +19,7 @@ from sqlalchemy.orm import Session
 from models import AttendanceLog, Employee
 from services import rules as R
 
-STATUSES = ("present", "late", "half_day", "absent", "leave", "holiday", "off", "future")
+STATUSES = ("present", "late", "half_day", "wfh", "absent", "leave", "holiday", "off", "future")
 
 
 @dataclass
@@ -61,6 +62,7 @@ def build(db: Session, year: int, month: int, employee_ids: list[int] | None = N
                 .all()):
         logs[(l.employee_id, l.date)] = l
     leave = R.leave_days(db, None, first, last)
+    wfh = R.leave_days(db, None, first, last, wfh=True)
 
     rows = []
     for e in employees:
@@ -85,6 +87,8 @@ def build(db: Session, year: int, month: int, employee_ids: list[int] | None = N
                 cell = {"status": "off"}
             elif day.date in leave.get(e.id, set()):
                 cell = {"status": "leave"}
+            elif day.date in wfh.get(e.id, set()):
+                cell = {"status": "wfh"}
             elif day.date < today:
                 cell = {"status": "absent"}
             elif day.date == today:
@@ -92,8 +96,8 @@ def build(db: Session, year: int, month: int, employee_ids: list[int] | None = N
             cells.append(cell)
             totals[cell["status"]] += 1
 
-        expected = totals["present"] + totals["late"] + totals["half_day"] + totals["absent"]
-        attended = totals["present"] + totals["late"] + totals["half_day"]
+        attended = totals["present"] + totals["late"] + totals["half_day"] + totals["wfh"]
+        expected = attended + totals["absent"]
         rows.append({
             "employee_id": e.id, "name": e.name, "category": e.category, "is_active": e.is_active,
             "cells": cells, "totals": totals,
@@ -115,9 +119,9 @@ def build(db: Session, year: int, month: int, employee_ids: list[int] | None = N
 
 # ── Excel ────────────────────────────────────────────────────────────────────
 
-CODES = {"present": "P", "late": "L", "half_day": "½", "absent": "A", "leave": "LV",
+CODES = {"present": "P", "late": "L", "half_day": "½", "wfh": "W", "absent": "A", "leave": "LV",
          "holiday": "H", "off": "", "future": ""}
-FILLS = {"present": "DCFCE7", "late": "FEF3C7", "half_day": "FFE4E6", "absent": "FEE2E2",
+FILLS = {"present": "DCFCE7", "late": "FEF3C7", "half_day": "FFE4E6", "wfh": "CCFBF1", "absent": "FEE2E2",
          "leave": "DBEAFE", "holiday": "EDE9FE", "off": "F3F4F6", "future": "FFFFFF"}
 
 
@@ -138,11 +142,11 @@ def to_xlsx(data: dict, company: str) -> bytes:
     ws["A1"] = f"{company} — attendance register, {data['month_name']}"
     ws["A1"].font = Font(size=14, bold=True)
     ws["A2"] = (f"Office hours {data['work_start']}–{data['work_end']}.  "
-                "P present · L late · ½ half day · A absent · LV leave · H holiday")
+                "P present · L late · ½ half day · W work from home · A absent · LV leave · H holiday")
     ws["A2"].font = Font(size=9, color="6B7280")
 
     header = ["Employee", "Team"] + [f"{d['day']}\n{d['weekday'][:2]}" for d in data["days"]] + \
-             ["Present", "Late", "Half day", "Absent", "Leave", "Hours", "Overtime h", "Attendance %"]
+             ["Present", "Late", "Half day", "WFH", "Absent", "Leave", "Hours", "Overtime h", "Attendance %"]
     for c, text in enumerate(header, start=1):
         cell = ws.cell(row=4, column=c, value=text)
         cell.font = Font(bold=True, size=9, color="374151")
@@ -161,7 +165,7 @@ def to_xlsx(data: dict, company: str) -> bytes:
             x.fill = PatternFill("solid", fgColor=FILLS[cell["status"]])
             x.alignment, x.border, x.font = center, border, Font(size=9, bold=cell["status"] in ("absent", "late"))
         t = row["totals"]
-        values = [t["present"], t["late"], t["half_day"], t["absent"], t["leave"], row["worked_hours"],
+        values = [t["present"], t["late"], t["half_day"], t["wfh"], t["absent"], t["leave"], row["worked_hours"],
                   row["overtime_hours"], row["attendance_pct"] if row["attendance_pct"] is not None else ""]
         for j, v in enumerate(values):
             x = ws.cell(row=r, column=3 + n_days + j, value=v)
@@ -173,7 +177,7 @@ def to_xlsx(data: dict, company: str) -> bytes:
     ws.column_dimensions["B"].width = 16
     for i in range(n_days):
         ws.column_dimensions[get_column_letter(3 + i)].width = 4.2
-    for j in range(8):
+    for j in range(9):
         ws.column_dimensions[get_column_letter(3 + n_days + j)].width = 10
     ws.row_dimensions[4].height = 30
     ws.freeze_panes = "C5"

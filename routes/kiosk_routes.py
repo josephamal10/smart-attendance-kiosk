@@ -12,13 +12,14 @@ to it and single-use, so a check-in always needs a fresh blink in front of the c
 These endpoints are plain `def` (run in a thread pool) because face models are CPU-bound.
 """
 import re
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from auth import create_access_token
 from database import get_db
+from models import Employee
 from schemas import CheckInResponse, LivenessResponse
 from services import liveness_service, rules as R
 from services.attendance_service import mark_attendance
@@ -38,8 +39,34 @@ def _session(session_id: str) -> str:
 
 @router.get("/info")
 def kiosk_info(db: Session = Depends(get_db)):
-    """What the lock screen shows before anyone signs in: just the company name."""
-    return {"company_name": get_setting(db, "company_name")}
+    """What the lock screen shows before anyone signs in: the company name, today's birthdays
+    and work anniversaries (first names only, if enabled) and whether to speak greetings."""
+    return {
+        "company_name": get_setting(db, "company_name"),
+        "voice_greeting": bool(get_setting(db, "voice_greeting")),
+        "celebrations": celebrations(db, date.today()) if get_setting(db, "show_celebrations") else [],
+    }
+
+
+def _same_day(d: date, today: date) -> bool:
+    if (d.month, d.day) == (today.month, today.day):
+        return True
+    # 29 Feb birthdays are celebrated on 28 Feb in other years
+    leap = today.year % 4 == 0 and (today.year % 100 != 0 or today.year % 400 == 0)
+    return (d.month, d.day) == (2, 29) and (today.month, today.day) == (2, 28) and not leap
+
+
+def celebrations(db: Session, today: date) -> list[dict]:
+    out = []
+    for e in (db.query(Employee).filter(Employee.role == "user", Employee.is_active == True)  # noqa: E712
+                .order_by(Employee.name).all()):
+        first = e.name.split()[0]
+        if e.birthday and _same_day(e.birthday, today):
+            out.append({"kind": "birthday", "name": first, "team": e.category})
+        if e.joined_on and e.joined_on.year < today.year and _same_day(e.joined_on, today):
+            out.append({"kind": "anniversary", "name": first, "team": e.category,
+                        "years": today.year - e.joined_on.year})
+    return out
 
 
 @router.post("/liveness", response_model=LivenessResponse)

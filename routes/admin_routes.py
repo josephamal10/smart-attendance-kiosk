@@ -128,6 +128,7 @@ def create_employee(data: EmployeeCreate, db: Session = Depends(get_db),
                     admin: Employee = Depends(require_super)):
     """Employees get no password. The username column must be unique, so it's an internal id."""
     emp = Employee(name=data.name.strip(), category=data.category, role="user",
+                   birthday=data.birthday, joined_on=data.joined_on,
                    username=f"emp-{uuid.uuid4().hex[:10]}", password=NO_PASSWORD)
     db.add(emp)
     db.flush()
@@ -144,7 +145,7 @@ def update_employee(employee_id: int, data: EmployeeUpdate, db: Session = Depend
         raise HTTPException(status_code=404, detail="Employee not found")
     changes = []
     for field, value in data.model_dump(exclude_unset=True).items():
-        if value is None:
+        if value is None and field not in ("birthday", "joined_on"):
             continue
         value = value.strip() if field == "name" else value
         if getattr(emp, field) != value:
@@ -187,12 +188,15 @@ def attendance_percentage(
     holidays = R.holidays_between(db, start, end)
     workdays = set(R.working_days(rules, holidays, start, end))
     leave = R.leave_days(db, None, start, end)
+    wfh = R.leave_days(db, None, start, end, wfh=True)
     logs = (db.query(AttendanceLog)
               .filter(AttendanceLog.date >= start.isoformat(), AttendanceLog.date <= end.isoformat()).all())
 
     result = []
     for emp in employees:
         mine = [l for l in logs if l.employee_id == emp.id and date.fromisoformat(l.date) in workdays]
+        # Work-from-home days without a kiosk scan still count as attended
+        home = (wfh.get(emp.id) or set()) & workdays - {date.fromisoformat(l.date) for l in mine}
         on_leave = len((leave.get(emp.id) or set()) & workdays)
         expected = len(workdays) - on_leave
         late = sum(1 for l in mine if "late" in R.evaluate(l, rules).flags)
@@ -200,11 +204,11 @@ def attendance_percentage(
             "employee_id":   emp.id,
             "name":          emp.name,
             "category":      emp.category,
-            "attended_days": len(mine),
+            "attended_days": len(mine) + len(home),
             "working_days":  expected,
             "leave_days":    on_leave,
             "late_days":     late,
-            "percentage":    round(min(len(mine), expected) / expected * 100, 1) if expected > 0 else 0.0,
+            "percentage":    round(min(len(mine) + len(home), expected) / expected * 100, 1) if expected > 0 else 0.0,
         })
     return result
 

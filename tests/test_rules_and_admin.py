@@ -239,12 +239,16 @@ def test_bad_settings_rejected(client, make_employee, login, bad):
 def test_analytics_shape(client, make_employee, login, db_session):
     make_employee("boss", role="admin")
     a, b = make_employee("arun", category="Developer"), make_employee("priya", category="HR")
-    _log(db_session, a.id, TODAY, "09:05", None)
-    _log(db_session, b.id, TODAY, "09:45", None)
+    # The last working day: weekends don't count towards punctuality, and tests also run on Sundays
+    day = TODAY
+    while day.weekday() >= 5:
+        day -= timedelta(days=1)
+    _log(db_session, a.id, day, "09:05", None)
+    _log(db_session, b.id, day, "09:45", None)
     data = client.get("/admin/analytics?days=7", headers=login("boss")).json()
     assert len(data["daily"]) == 7
-    today = data["daily"][-1]
-    assert today["present"] == 2 and today["late"] == 1
+    that_day = next(d for d in data["daily"] if d["date"] == day.isoformat())
+    assert that_day["present"] == 2 and that_day["late"] == 1
     assert {t["team"] for t in data["teams"]} == {"Developer", "HR"}
     assert data["punctuality"][0]["name"] == "Arun"  # on time beats late
 

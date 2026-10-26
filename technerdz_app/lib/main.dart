@@ -63,7 +63,7 @@ class _AttendanceAppState extends State<AttendanceApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'NanoNino Attendance',
+      title: 'Smart Attendance Kiosk',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.theme,
       navigatorKey: navigatorKey,

@@ -1,11 +1,11 @@
 {
-    "name": "NanoNino Attendance",
-    "short_name": "NanoNino",
+    "name": "Smart Attendance Kiosk",
+    "short_name": "Attendance",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "NanoNino attendance — admin dashboard",
+    "description": "Smart Attendance Kiosk — admin dashboard",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

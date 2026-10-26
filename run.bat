@@ -1,7 +1,7 @@
 @echo off
 rem One-click start: starts the servers in their own (minimised) windows, waits until they
 rem answer, then opens the kiosk app full screen. A server that crashes restarts by itself.
-rem To stop everything: close the "NanoNino" server windows, and close the app from a super
+rem To stop everything: close the "Attendance" server windows, and close the app from a super
 rem admin's account menu ("Close the kiosk app").
 cd /d "%~dp0"
 rem LAN=1 lets other devices on the office network use the web dashboard
@@ -17,11 +17,11 @@ if not errorlevel 1 goto app
 if "%LAN%"=="1" (
   %PY% scripts\make_cert.py
   set HTTPS_PORT=8443
-  start "NanoNino network server (HTTPS)" /min /d "%~dp0" cmd /k "set DISABLE_SCHEDULER=1&& scripts\serve.bat 0.0.0.0 8443 --ssl-keyfile certs\server.key --ssl-certfile certs\server.crt"
+  start "Attendance network server (HTTPS)" /min /d "%~dp0" cmd /k "set DISABLE_SCHEDULER=1&& scripts\serve.bat 0.0.0.0 8443 --ssl-keyfile certs\server.key --ssl-certfile certs\server.crt"
 )
 rem The kiosk app talks to this one, on this PC only: plain HTTP never leaves the machine.
 rem It also runs the daily jobs (auto check-out, HR email, backups).
-start "NanoNino server" /min /d "%~dp0" cmd /k "scripts\serve.bat 127.0.0.1 8000"
+start "Attendance server" /min /d "%~dp0" cmd /k "scripts\serve.bat 127.0.0.1 8000"
 echo Starting the server (first start takes ~10 seconds while models load)...
 :wait
 "%SystemRoot%\System32\timeout.exe" /t 2 /nobreak >nul

@@ -16,7 +16,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
 
     expect(find.text('Tap anywhere to check in or out'), findsOneWidget);
-    expect(find.text('NANONINO'), findsOneWidget);
+    expect(find.text('SMART ATTENDANCE KIOSK'), findsOneWidget);
     expect(find.byTooltip('Admin sign-in'), findsOneWidget);
     expect(find.textContaining('My dashboard'), findsOneWidget);
     expect(find.text('HOW TO CHECK IN'), findsNothing); // camera not open yet

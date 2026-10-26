@@ -214,7 +214,7 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
         padding: const EdgeInsets.fromLTRB(40, 32, 40, 28),
         child: Column(children: [
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const BrandMark(size: 40, onDark: true, subtitle: 'Attendance'),
+            const BrandMark(size: 40, onDark: true, subtitle: 'Face check-in'),
             // The offline badge sits in the middle and shrinks (long translations get "...")
             Expanded(
               child: _online == false
@@ -322,7 +322,7 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
 
   /// Shown while the server can't be reached, so nobody scans in vain.
   Widget _offlineBadge() => Tooltip(
-        message: 'Check that the NanoNino server window is open on this PC. '
+        message: 'Check that the Attendance server window is open on this PC. '
             'This clears by itself when the server is back.',
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),

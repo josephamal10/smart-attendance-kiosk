@@ -55,7 +55,7 @@ def up_to_date() -> bool:
 def make() -> None:
     hosts, ips = wanted_names()
     key = ec.generate_private_key(ec.SECP256R1())
-    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "NanoNino attendance server")])
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Smart Attendance Kiosk server")])
     now = dt.datetime.now(dt.timezone.utc)
     cert = (x509.CertificateBuilder()
             .subject_name(name).issuer_name(name)

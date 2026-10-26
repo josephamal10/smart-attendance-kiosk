@@ -45,7 +45,7 @@ class BrandMark extends StatelessWidget {
         color: onDark ? Colors.white.withValues(alpha: 0.14) : null,
         border: onDark ? Border.all(color: Colors.white.withValues(alpha: 0.25)) : null,
       ),
-      // Monogram of the company name, e.g. "N" for NanoNino
+      // Monogram of the name, e.g. "S" for Smart Attendance Kiosk
       child: Center(
         child: ValueListenableBuilder<String>(
           valueListenable: Branding.name,
@@ -63,8 +63,14 @@ class BrandMark extends StatelessWidget {
       Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
         ValueListenableBuilder<String>(
           valueListenable: Branding.name,
-          builder: (_, name, __) => Text(name.toUpperCase(), style: TextStyle(
-              fontSize: size * 0.4, fontWeight: FontWeight.w700, letterSpacing: 1.2, color: nameColor)),
+          // A capped width lets a long name wrap onto two lines instead of running off narrow
+          // spaces like the admin sidebar (works even where the parent gives unlimited width)
+          builder: (_, name, __) => ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: size * 4.6),
+            child: Text(name.toUpperCase(), style: TextStyle(
+                fontSize: size * 0.4, fontWeight: FontWeight.w700, letterSpacing: 1.2, height: 1.2,
+                color: nameColor)),
+          ),
         ),
         if (subtitle != null)
           Text(subtitle!, style: TextStyle(fontSize: 12, color: subColor, fontWeight: FontWeight.w500)),

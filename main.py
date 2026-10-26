@@ -30,7 +30,7 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(
-    title="NanoNino Attendance System API",
+    title="Smart Attendance Kiosk API",
     description="Face recognition based automated attendance system",
     version="1.2.0",
     lifespan=lifespan,
@@ -71,5 +71,5 @@ if os.path.isfile(os.path.join(WEB_ADMIN_DIR, "index.html")):
 
 @app.get("/")
 def root():
-    return {"message": "NanoNino Attendance API is running",
+    return {"message": "Smart Attendance Kiosk API is running",
             "web_dashboard": "/app/" if any(getattr(r, "name", "") == "web-admin" for r in app.routes) else None}

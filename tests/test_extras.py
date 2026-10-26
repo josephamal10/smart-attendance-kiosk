@@ -194,5 +194,5 @@ def test_register_excel_has_a_wfh_column():
                       "totals": {s: (1 if s == "wfh" else 0) for s in register.STATUSES},
                       "attendance_pct": 100.0, "worked_hours": 0, "overtime_hours": 0}]}
     import io
-    ws = load_workbook(io.BytesIO(register.to_xlsx(data, "NanoNino"))).active
+    ws = load_workbook(io.BytesIO(register.to_xlsx(data, "Smart Attendance Kiosk"))).active
     assert ws["C5"].value == "W" and ws.cell(row=4, column=7).value == "WFH"

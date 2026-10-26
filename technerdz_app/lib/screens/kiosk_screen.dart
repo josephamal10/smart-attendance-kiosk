@@ -311,7 +311,7 @@ class _KioskScreenState extends State<KioskScreen> {
       Row(children: [
         const Expanded(
           child: Align(alignment: Alignment.centerLeft,
-              child: FittedBox(fit: BoxFit.scaleDown, child: BrandMark(size: 34, subtitle: 'Attendance kiosk'))),
+              child: FittedBox(fit: BoxFit.scaleDown, child: BrandMark(size: 34, subtitle: 'Face check-in'))),
         ),
         Tooltip(
           message: 'Back to the home screen',

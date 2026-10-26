@@ -336,8 +336,14 @@ class CameraPill extends StatelessWidget {
       );
 }
 
-/// "8h 05m"
-String formatMinutes(int minutes) => '${minutes ~/ 60}h ${(minutes % 60).toString().padLeft(2, '0')}m';
+/// "45 mins", "1 hr", "1 hr 20 mins", "8 hrs 5 mins"
+String formatMinutes(int minutes) {
+  final h = minutes ~/ 60, m = minutes % 60;
+  final hrs = '$h hr${h == 1 ? '' : 's'}';
+  final mins = '$m min${m == 1 ? '' : 's'}';
+  if (h == 0) return mins;
+  return m == 0 ? hrs : '$hrs $mins';
+}
 
 /// Late 16m · Left early · Half day · Missed check-out, as compact badges.
 class FlagBadges extends StatelessWidget {
@@ -350,8 +356,8 @@ class FlagBadges extends StatelessWidget {
       this.whenClean});
 
   static (String, Tone) describe(String flag, int late, int early) => switch (flag) {
-        'late'            => ('Late ${late}m', Tone.warning),
-        'early_leave'     => ('Left early ${early}m', Tone.warning),
+        'late'            => ('Late ${formatMinutes(late)}', Tone.warning),
+        'early_leave'     => ('Left early ${formatMinutes(early)}', Tone.warning),
         'half_day'        => ('Half day', Tone.danger),
         'missed_checkout' => ('Missed check-out', Tone.danger),
         _                 => (flag, Tone.neutral),

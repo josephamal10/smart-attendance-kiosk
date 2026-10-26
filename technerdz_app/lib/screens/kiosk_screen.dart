@@ -355,20 +355,20 @@ class _KioskScreenState extends State<KioskScreen> {
     ]);
   }
 
-  /// One line about today: "On time", "Late by 12 min", "Worked 8h 05m"...
+  /// One line about today: "On time", "Late by 1 hr 20 mins", "Worked 8 hrs 5 mins"...
   (String, Tone, IconData) _summary(Map<String, dynamic> r) {
     final flags = ((r['flags'] as List?) ?? const []).cast<String>();
     final worked = r['worked_minutes'] as int?;
     switch (r['action']) {
       case 'in':
         return flags.contains('late')
-            ? (KioskText.t('late_by', {'n': r['late_minutes']}), Tone.warning, Icons.schedule)
+            ? (KioskText.t('late_by', {'d': KioskText.duration(r['late_minutes'] ?? 0)}), Tone.warning, Icons.schedule)
             : (KioskText.t('on_time'), Tone.success, Icons.check_circle_outline);
       case 'out':
       case 'done':
-        final w = worked == null ? KioskText.t('day_complete') : KioskText.t('worked', {'x': formatMinutes(worked)});
+        final w = worked == null ? KioskText.t('day_complete') : KioskText.t('worked', {'x': KioskText.duration(worked)});
         return flags.contains('early_leave')
-            ? ('$w · ${KioskText.t('left_early', {'n': r['early_minutes']})}', Tone.warning, Icons.timelapse)
+            ? ('$w · ${KioskText.t('left_early', {'d': KioskText.duration(r['early_minutes'] ?? 0)})}', Tone.warning, Icons.timelapse)
             : (w, Tone.primary, Icons.timelapse);
       default:
         return (KioskText.t('earlier'), Tone.neutral, Icons.info_outline);
@@ -458,11 +458,20 @@ class KioskScreenSpeech {
     final hello = now.hour < 12 ? 'Good morning' : now.hour < 17 ? 'Good afternoon' : 'Good evening';
     final late = ((r['flags'] as List?) ?? const []).contains('late');
     return switch (r['action']) {
-      'in' => late ? "$hello, $first. You're checked in, ${r['late_minutes']} minutes late." : "$hello, $first. You're checked in.",
+      'in' => late ? "$hello, $first. You're checked in, ${_spoken(r['late_minutes'] ?? 0)} late." : "$hello, $first. You're checked in.",
       'out' => 'Goodbye, $first. See you tomorrow.',
       'too_soon' => "Hi $first, you're already checked in.",
       'done' => "Hi $first, you're all done for today.",
       _ => 'Opening your dashboard, $first.',
     };
+  }
+
+  /// "20 minutes", "1 hour 20 minutes" — written out in full, as it's spoken.
+  static String _spoken(int minutes) {
+    final h = minutes ~/ 60, m = minutes % 60;
+    final hours = '$h hour${h == 1 ? '' : 's'}';
+    final mins = '$m minute${m == 1 ? '' : 's'}';
+    if (h == 0) return mins;
+    return m == 0 ? hours : '$hours $mins';
   }
 }

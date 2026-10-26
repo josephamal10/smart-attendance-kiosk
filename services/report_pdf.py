@@ -17,7 +17,12 @@ FLAG_TEXT = {"late": "late", "early_leave": "left early", "half_day": "half day"
 
 
 def _hm(minutes: int | None) -> str:
-    return f"{minutes // 60}h {minutes % 60:02d}m" if minutes else ""
+    """45 mins · 1 hr · 1 hr 20 mins · 8 hrs 5 mins"""
+    if not minutes:
+        return ""
+    h, m = divmod(minutes, 60)
+    hrs, mins = f"{h} hr{'s' if h != 1 else ''}", f"{m} min{'s' if m != 1 else ''}"
+    return mins if h == 0 else hrs if m == 0 else f"{hrs} {mins}"
 
 
 def build(company: str, register: dict, row: dict) -> bytes:

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../theme/branding.dart';
 import '../services/api_service.dart';
+import '../widgets/demo_panel.dart';
 import '../widgets/ui.dart';
 import 'admin_dashboard.dart';
 
@@ -22,6 +23,19 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
   bool _loading = false;
   bool _obscure = true;
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    Branding.load(); // also tells us whether the server runs the demo (shows the demo accounts)
+  }
+
+  /// Demo: "Use" fills in the account and signs straight in.
+  void _useDemoAccount(String username, String password) {
+    _userCtrl.text = username;
+    _passCtrl.text = password;
+    _login();
+  }
 
   @override
   void dispose() {
@@ -155,6 +169,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
               : const Text('Sign in'),
         ),
       ),
+      DemoPanel(onUseAccount: _useDemoAccount),
     ]);
   }
 }

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from auth import ADMIN_ROLES, hash_password, require_super
 from database import get_db
 from models import Employee
-from services import audit
+from services import audit, demo
 
 router = APIRouter(prefix="/admin/admins", tags=["Admins"])
 
@@ -49,6 +49,7 @@ def list_admins(db: Session = Depends(get_db), _: Employee = Depends(require_sup
 
 @router.post("", response_model=AdminOut)
 def add_admin(data: AdminCreate, db: Session = Depends(get_db), me: Employee = Depends(require_super)):
+    demo.block_account_changes()
     if db.query(Employee).filter(Employee.username == data.username).first():
         raise HTTPException(status_code=400, detail="That username is already taken.")
     a = Employee(name=data.name.strip(), username=data.username, password=hash_password(data.password),
@@ -64,6 +65,7 @@ def add_admin(data: AdminCreate, db: Session = Depends(get_db), me: Employee = D
 @router.patch("/{admin_id}", response_model=AdminOut)
 def update_admin(admin_id: int, data: AdminUpdate, db: Session = Depends(get_db),
                  me: Employee = Depends(require_super)):
+    demo.block_account_changes()
     a = db.get(Employee, admin_id)
     if not a or a.role not in ADMIN_ROLES:
         raise HTTPException(status_code=404, detail="Account not found")

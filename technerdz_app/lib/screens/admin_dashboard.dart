@@ -710,7 +710,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
   String _hours(AttendanceLog l) {
     if (l.inTime == null || l.outTime == null) return '—';
     final d = l.outTime!.difference(l.inTime!);
-    return '${d.inHours}h ${(d.inMinutes % 60).toString().padLeft(2, '0')}m';
+    return formatMinutes(d.inMinutes);
   }
 
   // ── Attendance records ───────────────────────────────────

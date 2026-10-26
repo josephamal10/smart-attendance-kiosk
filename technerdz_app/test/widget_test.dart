@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:technerdz_app/i18n/kiosk_text.dart';
 
 import 'package:technerdz_app/models/employee.dart';
 import 'package:technerdz_app/screens/admin_login_screen.dart';
@@ -7,6 +8,7 @@ import 'package:technerdz_app/screens/kiosk_screen.dart';
 import 'package:technerdz_app/screens/lock_screen.dart';
 import 'package:technerdz_app/screens/my_attendance_screen.dart';
 import 'package:technerdz_app/services/api_service.dart';
+import 'package:technerdz_app/services/demo.dart';
 import 'package:technerdz_app/widgets/ui.dart';
 
 void main() {
@@ -98,14 +100,18 @@ void main() {
   });
 
   test('Durations read like "8h 05m"', () {
-    expect(formatMinutes(485), '8h 05m');
-    expect(formatMinutes(59), '0h 59m');
+    expect(formatMinutes(485), '8 hrs 5 mins');
+    expect(formatMinutes(59), '59 mins');
+    expect(formatMinutes(80), '1 hr 20 mins');
+    expect(formatMinutes(60), '1 hr');
+    expect(formatMinutes(1), '1 min');
   });
 
   testWidgets('Flags become readable badges', (tester) async {
     await tester.pumpWidget(const MaterialApp(home: Scaffold(body: FlagBadges(
-        flags: ['late', 'half_day', 'missed_checkout'], lateMinutes: 16))));
-    expect(find.text('Late 16m'), findsOneWidget);
+        flags: ['late', 'early_leave', 'half_day', 'missed_checkout'], lateMinutes: 16, earlyMinutes: 85))));
+    expect(find.text('Late 16 mins'), findsOneWidget);
+    expect(find.text('Left early 1 hr 25 mins'), findsOneWidget);
     expect(find.text('Half day'), findsOneWidget);
     expect(find.text('Missed check-out'), findsOneWidget);
   });
@@ -126,7 +132,7 @@ void main() {
     await tester.pump();
     expect(find.text('Good morning, Priya!'), findsOneWidget);
     expect(find.text('Checked in'), findsOneWidget);
-    expect(find.text('Late by 12 min'), findsOneWidget);
+    expect(find.text('Late by 12 mins'), findsOneWidget);
     expect(find.text('My dashboard'), findsOneWidget);
     await tester.binding.setSurfaceSize(null);
   });
@@ -212,7 +218,39 @@ void main() {
         "Good morning, Priya. You're checked in.");
     expect(KioskScreenSpeech.of({'name': 'Priya Raman', 'action': 'in', 'flags': ['late'], 'late_minutes': 12}, morning),
         "Good morning, Priya. You're checked in, 12 minutes late.");
+    expect(KioskScreenSpeech.of({'name': 'Priya', 'action': 'in', 'flags': ['late'], 'late_minutes': 80}, morning),
+        "Good morning, Priya. You're checked in, 1 hour 20 minutes late.");
     expect(KioskScreenSpeech.of({'name': 'Arun', 'action': 'out'}, DateTime(2026, 10, 23, 18, 5)),
         'Goodbye, Arun. See you tomorrow.');
+  });
+
+  testWidgets('In demo mode the sign-in page lists demo accounts and employees', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1366, 1000));
+    Demo.update({'demo': {
+      'accounts': [{'username': 'demo-admin', 'password': 'demo-pass-2026', 'name': 'Demo Admin',
+                    'role': 'Super admin — can change everything'}],
+      'employees': [{'id': 2, 'name': 'Priya Raman', 'category': 'HR'}],
+    }});
+    await tester.pumpWidget(const MaterialApp(home: AdminLoginScreen()));
+    await tester.pump();
+    expect(find.text('TRY THE DEMO'), findsOneWidget);
+    expect(find.text('demo-admin  ·  demo-pass-2026'), findsOneWidget);
+    expect(find.text('Priya Raman'), findsOneWidget);
+    await tester.tap(find.text('Use'));
+    await tester.pump();
+    expect(find.widgetWithText(TextField, 'demo-admin'), findsOneWidget);   // filled in for them
+    Demo.update({}); // back to normal (no demo) for the other tests
+    await tester.pump();
+    expect(find.text('TRY THE DEMO'), findsNothing);
+    await tester.binding.setSurfaceSize(null);
+  });
+
+  test('Kiosk durations read naturally in every language', () {
+    expect(KioskText.duration(80), '1 hr 20 mins');
+    KioskText.lang.value = KioskLang.ta;
+    expect(KioskText.duration(80), '1 மணி நேரம் 20 நிமிடம்');
+    KioskText.lang.value = KioskLang.hi;
+    expect(KioskText.duration(150), '2 घंटे 30 मिनट');
+    KioskText.lang.value = KioskLang.en;
   });
 }

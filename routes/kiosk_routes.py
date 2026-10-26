@@ -21,7 +21,7 @@ from auth import create_access_token
 from database import get_db
 from models import Employee
 from schemas import CheckInResponse, LivenessResponse
-from services import liveness_service, rules as R
+from services import demo, liveness_service, rules as R
 from services.attendance_service import mark_attendance
 from services.face_service import identify_face, measure_ear
 from services.settings_service import get as get_setting
@@ -45,6 +45,8 @@ def kiosk_info(db: Session = Depends(get_db)):
         "company_name": get_setting(db, "company_name"),
         "voice_greeting": bool(get_setting(db, "voice_greeting")),
         "celebrations": celebrations(db, date.today()) if get_setting(db, "show_celebrations") else [],
+        # Demo database only: sign-in details and employees for visitors (see services/demo.py)
+        "demo": demo.info(db) if demo.enabled() else None,
     }
 
 

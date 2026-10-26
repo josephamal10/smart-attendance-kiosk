@@ -38,6 +38,18 @@ class KioskText {
     return s;
   }
 
+  /// "1 hr 20 mins" · "1 மணி நேரம் 20 நிமிடம்" · "1 घंटा 20 मिनट"
+  static String duration(int minutes) {
+    final h = minutes ~/ 60, m = minutes % 60;
+    final (hrs, mins) = switch (lang.value) {
+      KioskLang.ta => ('$h மணி நேரம்', '$m நிமிடம்'),
+      KioskLang.hi => ('$h ${h == 1 ? 'घंटा' : 'घंटे'}', '$m मिनट'),
+      KioskLang.en => ('$h hr${h == 1 ? '' : 's'}', '$m min${m == 1 ? '' : 's'}'),
+    };
+    if (h == 0) return mins;
+    return m == 0 ? hrs : '$hrs $mins';
+  }
+
   static String greeting(DateTime now) =>
       t(now.hour < 12 ? 'morning' : now.hour < 17 ? 'afternoon' : 'evening');
 
@@ -75,10 +87,10 @@ class KioskText {
       'already_in': 'Already checked in',
       'all_done': 'All done for today',
       'on_time': 'On time',
-      'late_by': 'Late by {n} min',
+      'late_by': 'Late by {d}',
       'worked': 'Worked {x} today',
       'day_complete': 'Day complete',
-      'left_early': 'left {n} min early',
+      'left_early': 'left {d} early',
       'earlier': 'Checked in earlier today',
       'msg_in': 'Have a great day!',
       'msg_out': 'See you tomorrow!',
@@ -121,10 +133,10 @@ class KioskText {
       'already_in': 'ஏற்கனவே வருகை பதிவாகியுள்ளது',
       'all_done': 'இன்றைக்கு எல்லாம் முடிந்தது',
       'on_time': 'சரியான நேரம்',
-      'late_by': '{n} நிமிடம் தாமதம்',
+      'late_by': '{d} தாமதம்',
       'worked': 'இன்று {x} வேலை செய்தீர்கள்',
       'day_complete': 'நாள் முடிந்தது',
-      'left_early': '{n} நிமிடம் முன்னதாகச் சென்றீர்கள்',
+      'left_early': '{d} முன்னதாகச் சென்றீர்கள்',
       'earlier': 'இன்று ஏற்கனவே வருகை பதிவானது',
       'msg_in': 'இனிய நாளாக அமையட்டும்!',
       'msg_out': 'நாளை சந்திப்போம்!',
@@ -167,10 +179,10 @@ class KioskText {
       'already_in': 'आगमन पहले ही दर्ज है',
       'all_done': 'आज का काम पूरा',
       'on_time': 'समय पर',
-      'late_by': '{n} मिनट देर',
+      'late_by': '{d} देर',
       'worked': 'आज {x} काम किया',
       'day_complete': 'दिन पूरा',
-      'left_early': '{n} मिनट पहले निकले',
+      'left_early': '{d} पहले निकले',
       'earlier': 'आज पहले ही आगमन दर्ज है',
       'msg_in': 'आपका दिन शुभ हो!',
       'msg_out': 'कल मिलते हैं!',

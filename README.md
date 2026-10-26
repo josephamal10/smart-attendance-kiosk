@@ -10,6 +10,22 @@ an admin dashboard (desktop and **web**) and a personal dashboard for every empl
 
 <sub>A 30-second tour made from the screenshots below (`python scripts/make_demo_gif.py`).</sub>
 
+## Try the demo
+
+A demo with a made-up company (12 employees, two months of attendance). After the setup in
+[Run it](#run-it), double-click **`demo.bat`**. It opens the dashboard in your browser at
+`http://127.0.0.1:8001/app/`, and the sign-in page lists everything below, with one-click **Use** buttons.
+
+| To see | Sign in with | Password |
+|---|---|---|
+| **Admin dashboard** (can change everything) | `demo-admin` | `demo-pass-2026` |
+| **Admin dashboard, read-only** (HR viewer) | `hr-viewer` | `demo-pass-2026` |
+| **An employee's own dashboard** | no sign-in: click a name under *Employee dashboards* | — |
+
+At the real kiosk an employee's dashboard opens only after a face scan; the demo skips that so
+anyone can look. Demo mode only switches on with the separate `demo.db` (never the real database),
+the demo data is made fresh every time it starts, and the shared demo logins can't be changed.
+
 
 | Lock screen (tap anywhere to check in) | Camera check-in |
 |---|---|

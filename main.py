@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from database import init_db
-from routes import (admin_routes, admins_routes, auth_routes, face_routes, insights_routes, kiosk_routes,
+from routes import (admin_routes, admins_routes, auth_routes, demo_routes, face_routes, insights_routes, kiosk_routes,
                     me_routes, notices_routes, requests_routes, settings_routes)
 from services import antispoof_service, scheduler
 from services.face_engine import get_engine
@@ -61,6 +61,7 @@ app.include_router(me_routes.router)
 app.include_router(me_routes.public_router)
 app.include_router(notices_routes.router)
 app.include_router(notices_routes.public_router)
+app.include_router(demo_routes.router)
 
 # The admin dashboard for HR's own computers: the Flutter web build, served from this same
 # server so it needs no CORS and no separate hosting. Build it with scripts/build_web.bat.

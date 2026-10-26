@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from database import get_db
+from services import demo
 from models import Employee
 from schemas import LoginRequest, TokenResponse, PasswordChange
 from auth import ADMIN_ROLES, hash_password, verify_password, create_access_token, require_admin
@@ -81,6 +82,7 @@ def login(data: LoginRequest, request: Request, db: Session = Depends(get_db)):
 def change_password(data: PasswordChange, db: Session = Depends(get_db),
                     admin: Employee = Depends(require_admin)):
     """The signed-in admin sets a new password. Any non-empty password is allowed."""
+    demo.block_account_changes()
     if not verify_password(data.current_password, admin.password):
         raise HTTPException(status_code=400, detail="Current password is incorrect.")
     admin.password = hash_password(data.new_password)

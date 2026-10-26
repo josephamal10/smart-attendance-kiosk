@@ -55,6 +55,7 @@ def tokens() -> tuple[str, str, int]:
     con = sqlite3.connect(os.path.join(ROOT, "demo.db"))
     admin = con.execute("select id from employees where username='demo-admin'").fetchone()[0]
     priya = con.execute("select id from employees where name='Priya Raman'").fetchone()[0]
+    con.close()
     ttl = timedelta(hours=2)
     return (create_access_token({"sub": str(admin), "role": "admin", "type": "access"}, expires=ttl),
             create_access_token({"sub": str(priya), "type": "self"}, expires=ttl), priya)
@@ -77,7 +78,8 @@ def main():
     args = ap.parse_args()
     os.chdir(ROOT)
 
-    subprocess.run([sys.executable, "scripts/seed_demo.py"], check=True)
+    # Today's data as of mid-afternoon, so the pictures look like a normal working day at any hour
+    subprocess.run([sys.executable, "scripts/seed_demo.py", "--at", "15:30"], check=True)
     admin_token, self_token, priya = tokens()
 
     if not args.no_build:
@@ -87,7 +89,8 @@ def main():
                         f"--dart-define=DEMO_TOKEN={admin_token}", f"--dart-define=SELF_TOKEN={self_token}"],
                        cwd=APP, check=True)
 
-    env = dict(os.environ, CORS_ORIGINS=f"http://localhost:{WEB_PORT},http://127.0.0.1:{WEB_PORT}")
+    env = dict(os.environ, CORS_ORIGINS=f"http://localhost:{WEB_PORT},http://127.0.0.1:{WEB_PORT}",
+               DEMO_FRESH="1")  # just seeded above; the tokens are for this data
     api = subprocess.Popen([sys.executable, "scripts/run_demo.py"], env=env,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     handler = partial(http.server.SimpleHTTPRequestHandler, directory=OUT_WEB)

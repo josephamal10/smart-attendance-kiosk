@@ -5,9 +5,11 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import '../i18n/kiosk_text.dart';
 import '../services/api_service.dart';
+import '../services/demo.dart';
 import '../services/voice.dart';
 import '../theme/app_theme.dart';
 import '../theme/branding.dart';
+import '../widgets/demo_panel.dart';
 import '../widgets/ui.dart';
 import 'admin_login_screen.dart';
 import 'kiosk_screen.dart';
@@ -90,6 +92,7 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
       final name = (info['company_name'] as String? ?? '').trim();
       if (name.isNotEmpty) Branding.name.value = name;
       Voice.enabled = info['voice_greeting'] != false;
+      Demo.update(info);
       final c = ((info['celebrations'] as List?) ?? const []).cast<Map<String, dynamic>>();
       if (mounted && c.toString() != _celebrations.toString()) setState(() => _celebrations = c);
     } catch (_) {
@@ -136,7 +139,37 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
   }
 
   void _checkIn() => _open(const KioskScreen());
-  void _myDashboard() => _open(const KioskScreen(dashboardMode: true));
+  void _myDashboard() {
+    if (!Demo.enabled) {
+      _open(const KioskScreen(dashboardMode: true));
+      return;
+    }
+    // Demo: visitors have no registered face, so let them pick an employee instead
+    showDialog(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('Open a dashboard'),
+      content: SizedBox(
+        width: 420,
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text('Demo: pick an employee. At the real kiosk this needs their face.', style: AppTheme.muted),
+          const SizedBox(height: 12),
+          for (final e in Demo.employees.take(6))
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: InitialsAvatar(e['name'], size: 34),
+              title: Text(e['name']),
+              subtitle: Text(e['category'] ?? 'No team'),
+              onTap: () { Navigator.pop(ctx); openDemoDashboard(context, e); },
+            ),
+          const Divider(),
+          TextButton.icon(
+            onPressed: () { Navigator.pop(ctx); _open(const KioskScreen(dashboardMode: true)); },
+            icon: const Icon(Icons.face_outlined, size: 18),
+            label: const Text('Scan my face instead'),
+          ),
+        ]),
+      ),
+    ));
+  }
   void _admin() => _open(const AdminLoginScreen());
 
   String _date() {
@@ -215,6 +248,24 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
         child: Column(children: [
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             const BrandMark(size: 40, onDark: true, subtitle: 'Face check-in'),
+            ValueListenableBuilder<Map<String, dynamic>?>(
+              valueListenable: Demo.info,
+              builder: (_, info, __) => info == null
+                  ? const SizedBox.shrink()
+                  : Padding(
+                      padding: const EdgeInsets.only(left: 14, top: 8),
+                      child: Tooltip(
+                        message: "Demo with made-up data. Tap 'My dashboard' to open any employee's "
+                            'dashboard; the admin sign-in page lists the demo accounts.',
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(color: const Color(0xFFF59E0B), borderRadius: BorderRadius.circular(999)),
+                          child: const Text('DEMO', style: TextStyle(color: Color(0xFF1F2937), fontSize: 12,
+                              fontWeight: FontWeight.w800, letterSpacing: 1.2)),
+                        ),
+                      ),
+                    ),
+            ),
             // The offline badge sits in the middle and shrinks (long translations get "...")
             Expanded(
               child: _online == false

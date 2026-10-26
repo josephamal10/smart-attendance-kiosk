@@ -38,6 +38,8 @@ def main():
     ap.add_argument("--db", default=os.path.join(ROOT, "demo.db"))
     ap.add_argument("--password", default="demo-pass-2026")
     ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--at", metavar="HH:MM", help="make today's records as if it were this time of day "
+                    "(the screenshot tool uses mid-afternoon); default: the real time")
     args = ap.parse_args()
 
     if os.path.exists(args.db):
@@ -102,11 +104,13 @@ def main():
                 start = datetime.combine(day, shift_start) + timedelta(minutes=rng.gauss(5, 18) - 15)
                 end = start + timedelta(hours=rng.uniform(7.5, 10))
             if day == today:
-                if rng.random() < 0.25:
-                    continue  # not in yet today
-                now = datetime.now()
-                start = min(start, now - timedelta(minutes=rng.randint(5, 90)))
-                end = end if end < now and rng.random() < 0.3 else None
+                # Today only has what could really have happened by now: nobody arrives in the
+                # future, and people still at work haven't checked out yet
+                now = (datetime.combine(today, datetime.strptime(args.at, "%H:%M").time())
+                       if args.at else datetime.now())
+                if start > now or rng.random() < 0.2:
+                    continue  # not in (yet) today
+                end = end if end < now else None
             db.add(AttendanceLog(employee_id=e.id, date=day.isoformat(),
                                  in_time=start, out_time=end, status="present"))
     db.commit()

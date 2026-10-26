@@ -406,6 +406,12 @@ class ApiService {
 
   static Future<String> companyName() async => (await kioskInfo())['company_name'] as String;
 
+  /// Demo mode only: a dashboard pass for [employeeId] without a face scan.
+  static Future<Map<String, dynamic>> demoDashboard(int employeeId) async {
+    return Map<String, dynamic>.from(_handleSelf(await http.post(_uri('/demo/dashboard'),
+        headers: {'Content-Type': 'application/json'}, body: jsonEncode({'employee_id': employeeId}))));
+  }
+
   // ── One-day shift changes (admin) ────────────────────
   static Future<List<Map<String, dynamic>>> getShiftChanges({String? status}) async {
     return (_handle(await http.get(_uri('/admin/shift-changes', {'status': status}), headers: _headers)) as List)

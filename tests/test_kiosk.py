@@ -223,3 +223,49 @@ def test_lock_screen_gets_the_company_name_without_signing_in(client, make_emplo
     s.pop("smtp_configured", None)
     client.put("/admin/settings", headers=login("boss"), json={**s, "company_name": "Acme Corp"})
     assert client.get("/kiosk/info").json()["company_name"] == "Acme Corp"
+
+
+# ── Demo mode ────────────────────────────────────────────────
+
+def test_demo_mode_is_off_by_default(client, make_employee):
+    arun = make_employee("arun")
+    assert client.get("/kiosk/info").json()["demo"] is None
+    assert client.post("/demo/dashboard", json={"employee_id": arun.id}).status_code == 404
+
+
+def test_demo_mode_never_runs_on_a_real_database(monkeypatch):
+    import database
+    from services import demo
+    monkeypatch.setenv("DEMO_MODE", "1")
+    monkeypatch.setattr(database, "DATABASE_URL", "sqlite:///./technerdz.db")
+    assert not demo.enabled()
+    monkeypatch.setattr(database, "DATABASE_URL", "sqlite:///./demo.db")
+    assert demo.enabled()
+
+
+def test_demo_shows_accounts_and_opens_employee_dashboards(client, make_employee, monkeypatch):
+    from services import demo
+    monkeypatch.setattr(demo, "enabled", lambda: True)
+    boss = make_employee("boss", role="admin")
+    arun = make_employee("arun", category="Tester")
+    info = client.get("/kiosk/info").json()["demo"]
+    assert info["accounts"][0]["username"] == "boss" and info["accounts"][0]["password"] == demo.DEMO_PASSWORD
+    assert info["employees"] == [{"id": arun.id, "name": "Arun", "category": "Tester"}]
+    opened = client.post("/demo/dashboard", json={"employee_id": arun.id}).json()
+    me = client.get("/me", headers={"Authorization": f"Bearer {opened['self_token']}"})
+    assert me.status_code == 200 and me.json()["name"] == "Arun"
+    # admin accounts can't be opened this way
+    assert client.post("/demo/dashboard", json={"employee_id": boss.id}).status_code == 404
+
+
+def test_demo_accounts_cannot_be_changed_by_visitors(client, make_employee, login, monkeypatch):
+    from services import demo
+    boss = make_employee("boss", role="admin")
+    headers = login("boss")
+    monkeypatch.setattr(demo, "enabled", lambda: True)
+    assert client.post("/auth/change-password", headers=headers,
+                       json={"current_password": "secret123", "new_password": "mine"}).status_code == 403
+    assert client.patch(f"/admin/admins/{boss.id}", headers=headers, json={"password": "x"}).status_code == 403
+    assert client.post("/admin/admins", headers=headers,
+                       json={"name": "Eve", "username": "eve", "password": "x", "role": "admin"}).status_code == 403
+    assert client.post("/auth/login", json={"username": "boss", "password": "secret123"}).status_code == 200

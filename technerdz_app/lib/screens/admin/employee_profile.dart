@@ -126,7 +126,7 @@ class _EmployeeProfileViewState extends State<EmployeeProfileView> {
         const SizedBox(width: AppTheme.gap),
         Expanded(child: StatCard(label: 'Late', value: '${t['late'] ?? 0}',
             icon: Icons.schedule_outlined, tone: (t['late'] ?? 0) > 0 ? Tone.warning : Tone.neutral,
-            caption: (row?['late_minutes'] ?? 0) > 0 ? '${row!['late_minutes']} min in total' : 'Always on time')),
+            caption: (row?['late_minutes'] ?? 0) > 0 ? '${formatMinutes(row!['late_minutes'])} late in total' : 'Always on time')),
         const SizedBox(width: AppTheme.gap),
         Expanded(child: StatCard(label: 'Absent', value: '${t['absent'] ?? 0}',
             icon: Icons.event_busy_outlined, tone: (t['absent'] ?? 0) > 0 ? Tone.danger : Tone.neutral,

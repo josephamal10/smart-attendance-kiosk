@@ -2,8 +2,8 @@
 #   docker compose up --build
 FROM python:3.11-slim
 
-# OpenCV/MediaPipe need these shared libraries even without a display
-RUN apt-get update && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 \
+# OpenCV/MediaPipe need these shared libraries (OpenGL ES / EGL too) even without a display
+RUN apt-get update && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 libgles2 libegl1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -22,8 +22,8 @@ RUN flutter config --no-analytics --no-cli-animations \
 
 # ── 2. The API, serving that dashboard at /app/ ──
 FROM python:3.11-slim
-# OpenCV/MediaPipe need these shared libraries even without a display
-RUN apt-get update && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 \
+# OpenCV/MediaPipe need these shared libraries (OpenGL ES / EGL too) even without a display
+RUN apt-get update && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 libgles2 libegl1 \
     && rm -rf /var/lib/apt/lists/*
 # Spaces run the app as user 1000, which must be able to write the demo database
 RUN useradd -m -u 1000 user

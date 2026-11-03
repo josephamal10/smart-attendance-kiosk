@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from auth import ADMIN_ROLES, get_current_user, require_self_or_admin
 from database import get_db
 from models import Employee, FaceImage
-from services import audit
+from services import audit, demo
 from services.face_service import save_face_image, get_face_count_by_employee
 
 router = APIRouter(prefix="/face", tags=["Face"])
@@ -32,6 +32,7 @@ def register_face(
     Called 10 times per direction (straight / left / right).
     Users can only add faces to their own account; admins can add to anyone's.
     """
+    demo.block_in_demo("face photos can only be registered at a real kiosk.")
     require_self_or_admin(employee_id, user)
     if not db.get(Employee, employee_id):
         raise HTTPException(status_code=404, detail="Employee not found")
@@ -54,6 +55,7 @@ def delete_face_image(
     user: Employee = Depends(get_current_user),
 ):
     """Delete one captured face image."""
+    demo.block_in_demo("face photos can only be registered at a real kiosk.")
     row = db.get(FaceImage, image_id)
     if not row:
         raise HTTPException(status_code=404, detail="Face image not found")
@@ -71,6 +73,7 @@ def delete_face_images(
     user: Employee = Depends(get_current_user),
 ):
     """Delete all face images for an employee."""
+    demo.block_in_demo("face photos can only be registered at a real kiosk.")
     require_self_or_admin(employee_id, user)
     rows = db.query(FaceImage).filter(FaceImage.employee_id == employee_id).all()
     for row in rows:

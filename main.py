@@ -9,7 +9,8 @@ from fastapi.staticfiles import StaticFiles
 from database import init_db
 from routes import (admin_routes, admins_routes, auth_routes, demo_routes, face_routes, insights_routes, kiosk_routes,
                     me_routes, notices_routes, requests_routes, settings_routes)
-from services import antispoof_service, scheduler
+from fastapi.responses import RedirectResponse
+from services import antispoof_service, demo, scheduler
 from services.face_engine import get_engine
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -24,9 +25,13 @@ if antispoof_service.is_enabled():
 async def lifespan(_app: FastAPI):
     # Auto check-out + daily HR email. Tests set DISABLE_SCHEDULER so they never touch real data.
     task = None if os.getenv("DISABLE_SCHEDULER") else asyncio.create_task(scheduler.run_forever())
+    # The public live demo swaps in fresh demo data every few hours (DEMO_RESET_HOURS)
+    reset = (asyncio.create_task(demo.reset_forever(float(os.environ["DEMO_RESET_HOURS"])))
+             if demo.enabled() and os.getenv("DEMO_RESET_HOURS") else None)
     yield
-    if task:
-        task.cancel()
+    for t in (task, reset):
+        if t:
+            t.cancel()
 
 
 app = FastAPI(
@@ -72,5 +77,7 @@ if os.path.isfile(os.path.join(WEB_ADMIN_DIR, "index.html")):
 
 @app.get("/")
 def root():
+    if demo.enabled() and any(getattr(r, "name", "") == "web-admin" for r in app.routes):
+        return RedirectResponse("/app/")   # the live demo: straight to the dashboard
     return {"message": "Smart Attendance Kiosk API is running",
             "web_dashboard": "/app/" if any(getattr(r, "name", "") == "web-admin" for r in app.routes) else None}

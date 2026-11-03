@@ -21,11 +21,44 @@ def enabled() -> bool:
     return os.getenv("DEMO_MODE") == "1" and "demo" in database.DATABASE_URL.lower()
 
 
-def block_account_changes() -> None:
-    """Every visitor shares the demo logins, so nobody may change them for the next person."""
+def block_in_demo(why: str) -> None:
+    """Refuse something a public demo mustn't allow, with a reason the visitor can read."""
     from fastapi import HTTPException
     if enabled():
-        raise HTTPException(status_code=403, detail="Not available in the demo: the demo accounts are shared.")
+        raise HTTPException(status_code=403, detail=f"Not available in the demo: {why}")
+
+
+def block_account_changes() -> None:
+    """Every visitor shares the demo logins, so nobody may change them for the next person."""
+    block_in_demo("the demo accounts are shared.")
+
+
+def reset() -> None:
+    """Swap in freshly made demo data (the live demo does this every few hours, so whatever
+    visitors changed — notices, records, approvals — doesn't stay for long)."""
+    import subprocess
+    import sys
+    path = database.DATABASE_URL.split("///", 1)[1]
+    fresh = path + ".fresh"
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    subprocess.run([sys.executable, os.path.join(root, "scripts", "seed_demo.py"), "--db", fresh],
+                   check=True, capture_output=True)
+    os.replace(fresh, path)      # atomic on Linux; new connections see the new file
+    database.engine.dispose()    # drop pooled connections to the old one
+
+
+async def reset_forever(hours: float) -> None:
+    import asyncio
+    import logging
+    from fastapi.concurrency import run_in_threadpool
+    log = logging.getLogger("attendance.demo")
+    while True:
+        await asyncio.sleep(hours * 3600)
+        try:
+            await run_in_threadpool(reset)
+            log.info("demo data reset")
+        except Exception:
+            log.exception("demo reset failed; trying again next time")
 
 
 def info(db: Session) -> dict:

@@ -50,11 +50,16 @@ def _record_failure(key) -> int:
 def login(data: LoginRequest, request: Request, db: Session = Depends(get_db)):
     """Admin sign-in. Employees don't sign in at all — they check in with their face."""
     key = _key(data.username, request)
-    _check_lockout(key)
+    # The demo's passwords are printed on its sign-in page, and every visitor may reach the server
+    # through the same proxy address, so one visitor's typos mustn't lock everyone out
+    if not demo.enabled():
+        _check_lockout(key)
 
     emp = db.query(Employee).filter(Employee.username == data.username).first()
     is_admin = emp is not None and emp.role in ADMIN_ROLES and emp.is_active
     if not is_admin or not verify_password(data.password, emp.password):
+        if demo.enabled():
+            raise HTTPException(status_code=401, detail="Wrong username or password.")
         attempts_left = _record_failure(key)
         if attempts_left <= 0:
             raise HTTPException(

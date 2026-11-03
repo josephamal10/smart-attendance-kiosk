@@ -269,3 +269,23 @@ def test_demo_accounts_cannot_be_changed_by_visitors(client, make_employee, logi
     assert client.post("/admin/admins", headers=headers,
                        json={"name": "Eve", "username": "eve", "password": "x", "role": "admin"}).status_code == 403
     assert client.post("/auth/login", json={"username": "boss", "password": "secret123"}).status_code == 200
+
+
+def test_public_demo_never_locks_the_shared_logins(client, make_employee, monkeypatch):
+    from services import demo
+    monkeypatch.setattr(demo, "enabled", lambda: True)
+    make_employee("boss", role="admin")
+    for _ in range(8):  # far more wrong guesses than the normal lockout allows
+        assert client.post("/auth/login", json={"username": "boss", "password": "nope"}).status_code == 401
+    assert client.post("/auth/login", json={"username": "boss", "password": "secret123"}).status_code == 200
+
+
+def test_public_demo_takes_no_face_photos(client, make_employee, login, monkeypatch):
+    from services import demo
+    monkeypatch.setattr(demo, "enabled", lambda: True)
+    make_employee("boss", role="admin")
+    arun = make_employee("arun")
+    res = client.post("/face/register", headers=login("boss"), data={"employee_id": arun.id, "direction": "straight"},
+                      files={"file": ("f.jpg", open("tests/fixtures/astronaut.jpg", "rb").read(), "image/jpeg")})
+    assert res.status_code == 403 and "real kiosk" in res.json()["detail"]
+    assert client.delete(f"/face/delete/{arun.id}", headers=login("boss")).status_code == 403
